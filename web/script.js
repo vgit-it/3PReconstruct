@@ -25,11 +25,11 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
   // ---- depth bands (visual depth only — no parallax) -------
   const BANDS = [
-    { scale: 1.40, alpha: 0.18, stroke: 1.5,  weight: 0.08 },
-    { scale: 1.10, alpha: 0.13, stroke: 1.0,  weight: 0.14 },
-    { scale: 0.85, alpha: 0.09, stroke: 0.75, weight: 0.20 },
-    { scale: 0.60, alpha: 0.06, stroke: 0.5,  weight: 0.26 },
-    { scale: 0.40, alpha: 0.04, stroke: 0.4,  weight: 0.32 },
+    { scale: 1.40, alpha: 0.09,  stroke: 1.5,  weight: 0.08 },
+    { scale: 1.10, alpha: 0.065, stroke: 1.0,  weight: 0.14 },
+    { scale: 0.85, alpha: 0.045, stroke: 0.75, weight: 0.20 },
+    { scale: 0.60, alpha: 0.030, stroke: 0.5,  weight: 0.26 },
+    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32 },
   ];
   const BASE_FW = 110, BASE_FH = 70;
   const DENSITY = 6800;
@@ -40,18 +40,18 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   // ---- depth well ------------------------------------------
   const WELL_RADIUS = 230;
   const INNER_FRAC = 0.58;
-  const SINK_SCALE = 0.22;
-  const SINK_ALPHA = 0.12;
-  const RIM_SCALE_BOOST = 0.40;
-  const RIM_ALPHA_BOOST = 2.20;
-  const RIM_PUSH_PX = 32;
+  const SINK_SCALE = 0.55;
+  const SINK_ALPHA = 0.45;
+  const RIM_SCALE_BOOST = 0.16;
+  const RIM_ALPHA_BOOST = 0.70;
+  const RIM_PUSH_PX = 12;
 
   // ---- pulse -----------------------------------------------
   const PULSE_DELAY = 600;      // ms still before pulse fires
   const PULSE_INTERVAL = 2800;  // ms between pulses while idle
   const PULSE_DURATION = 1400;
   const PULSE_MAX_R = WELL_RADIUS * 1.6;
-  const PULSE_ALPHA = 0.085;
+  const PULSE_ALPHA = 0.045;
 
   function mulberry32(seed) {
     return function () {
