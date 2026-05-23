@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3P — See yourself in your own memories</title>
+  <meta name="description" content="Smart glasses that quietly capture your day — then show it back to you from angles you never filmed." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <script>
+    // Defined early so inline img onerror handlers can use it.
+    window.makePlaceholder = function (filename, text, transparent) {
+      var el = document.createElement('div');
+      el.className = 'ph';
+      if (transparent) el.style.background = 'transparent';
+      el.innerHTML =
+        '<span class="ph-file">' + filename + '</span>' +
+        '<span class="ph-text">' + text + '</span>';
+      return el;
+    };
+  </script>
+</head>
+<body>
+
+  <!-- film-grain overlay -->
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- top scroll progress -->
+  <div class="progress" aria-hidden="true"><span></span></div>
+
+  <!-- top bar -->
+  <header class="topbar">
+    <a href="#hero" class="wordmark" aria-label="3P home">
+      <span class="dot"></span>
+      <span>3P</span>
+    </a>
+    <nav class="topnav">
+      <a href="#gap">Story</a>
+      <a href="#how">How</a>
+      <a href="#privacy">Privacy</a>
+      <a href="feature.html">Reel</a>
+    </nav>
+  </header>
+
+  <!-- floating action button -->
+  <a class="fab" href="feature.html" aria-label="Open the Daily Highlight Reel feature">
+    <span class="fab-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+    </span>
+    <span class="fab-label">See the reel</span>
+  </a>
+
+  <main>
+
+    <!-- ====================================================== -->
+    <!-- 1 — HERO                                                -->
+    <!-- ====================================================== -->
+    <section id="hero" class="hero">
+      <div class="spotlight" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <p class="eyebrow">An invention concept</p>
+        <h1 class="display">
+          See yourself <em>in your own</em> memories.
+        </h1>
+        <p class="sub">
+          Smart glasses that quietly capture your day — then show it back to you from angles you never filmed.
+        </p>
+      </div>
+      <a class="scroll-cue" href="#gap" aria-label="Scroll to begin">
+        <span>scroll</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </a>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 2 — THE GAP                                             -->
+    <!-- ====================================================== -->
+    <section id="gap" class="gap section-pad">
+      <div class="container narrow center">
+        <p class="eyebrow reveal">The gap</p>
+        <h2 class="display reveal">You're never in the photos <em>that matter.</em></h2>
+        <div class="gap-frame reveal">
+          <img src="images/missing-photographer.jpg" alt="" class="gap-photo" onerror="this.replaceWith(makePlaceholder('missing-photographer.jpg','The photo without you in it'))" />
+          <div class="gap-overlay" aria-hidden="true"></div>
+        </div>
+        <p class="caption reveal">The person behind the camera is missing from the memory.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 3 — THE PROMISE (pinned pull-back)                       -->
+    <!-- ====================================================== -->
+    <section id="promise" class="promise">
+      <div class="promise-pin">
+        <div class="promise-stage">
+          <img class="promise-img pov" src="images/pov-frame.jpg" alt="" onerror="this.replaceWith(makePlaceholder('pov-frame.jpg','First-person POV — what you see'))" />
+          <img class="promise-img exo" src="images/third-person-reconstruction.jpg" alt="" onerror="this.replaceWith(makePlaceholder('third-person-reconstruction.jpg','Third-person reconstruction — you, in frame'))" />
+          <div class="promise-vignette" aria-hidden="true"></div>
+        </div>
+        <div class="promise-text">
+          <p class="eyebrow">The promise</p>
+          <h2 class="display">What if your memories <em>saw you back?</em></h2>
+          <p class="caption">Scroll to pull the camera back.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 4 — HOW IT WORKS (pinned stepper)                        -->
+    <!-- ====================================================== -->
+    <section id="how" class="how">
+      <div class="how-pin">
+        <div class="how-visual" aria-hidden="true">
+          <!-- six layered visuals; opacity-controlled via JS -->
+          <div class="hv hv-1 active">
+            <svg viewBox="0 0 200 120" class="glasses">
+              <path d="M30 60 Q40 40 70 40 Q95 40 100 60 Q105 40 130 40 Q160 40 170 60" fill="none" stroke="currentColor" stroke-width="2"/>
+              <circle cx="65" cy="62" r="22" fill="none" stroke="currentColor" stroke-width="2"/>
+              <circle cx="135" cy="62" r="22" fill="none" stroke="currentColor" stroke-width="2"/>
+              <line x1="87" y1="62" x2="113" y2="62" stroke="currentColor" stroke-width="2"/>
+              <circle cx="65" cy="62" r="4" class="lens-dot"/>
+            </svg>
+            <div class="frame-counter"><span class="mono" data-counter>00:00:00</span><span class="tag">live</span></div>
+          </div>
+
+          <div class="hv hv-2">
+            <svg viewBox="0 0 200 200" class="buffer">
+              <circle cx="100" cy="100" r="68" fill="none" stroke="currentColor" stroke-opacity=".2" stroke-width="1.5"/>
+              <circle cx="100" cy="100" r="68" fill="none" stroke="currentColor" stroke-width="1.5" class="buffer-track"/>
+              <g class="buffer-frames"></g>
+              <text x="100" y="104" text-anchor="middle" class="buffer-label">last 2 min</text>
+            </svg>
+          </div>
+
+          <div class="hv hv-3">
+            <svg viewBox="0 0 200 200" class="buffer">
+              <circle cx="100" cy="100" r="68" fill="none" stroke="currentColor" stroke-opacity=".2" stroke-width="1.5"/>
+              <circle cx="100" cy="100" r="68" fill="none" stroke="var(--warm)" stroke-width="2" class="buffer-glow"/>
+              <g class="buffer-frames buffer-frames-saved"></g>
+              <text x="100" y="100" text-anchor="middle" class="buffer-label">saved</text>
+              <text x="100" y="118" text-anchor="middle" class="buffer-sub">trigger</text>
+            </svg>
+          </div>
+
+          <div class="hv hv-4">
+            <svg viewBox="0 0 320 80" class="timeline">
+              <line x1="20" y1="40" x2="300" y2="40" stroke="currentColor" stroke-opacity=".2" stroke-width="1"/>
+              <g class="tl-segs"></g>
+              <g class="tl-ticks"></g>
+            </svg>
+            <div class="tl-legend"><span class="dot warm"></span>remarkable<span class="sep"></span><span class="dot dim"></span>routine</div>
+          </div>
+
+          <div class="hv hv-5">
+            <svg viewBox="0 0 240 240" class="angles">
+              <circle cx="120" cy="120" r="32" class="scene-core"/>
+              <g class="angle-cams"></g>
+              <g class="angle-rays"></g>
+            </svg>
+            <div class="angle-label"><span class="num">9</span> candidates · <span class="pick">1 selected</span></div>
+          </div>
+
+          <div class="hv hv-6">
+            <div class="filmstrip">
+              <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+            </div>
+            <div class="filmstrip-caption">your day, replayed</div>
+          </div>
+        </div>
+
+        <div class="how-steps">
+          <ol>
+            <li class="step active" data-step="1">
+              <span class="step-num">01</span>
+              <h3>Wear glasses. Live your day.</h3>
+              <p>No buttons. No filming. Just presence.</p>
+            </li>
+            <li class="step" data-step="2">
+              <span class="step-num">02</span>
+              <h3>We hold the last two minutes. Nothing more.</h3>
+              <p>A rolling buffer in the glasses. Old frames evaporate.</p>
+            </li>
+            <li class="step" data-step="3">
+              <span class="step-num">03</span>
+              <h3>When something meaningful happens, we save it.</h3>
+              <p>A laugh. A face. A new place. The buffer becomes a memory.</p>
+            </li>
+            <li class="step" data-step="4">
+              <span class="step-num">04</span>
+              <h3>At day's end, we sift the routine from the remarkable.</h3>
+              <p>What deviated from your normal day floats to the top.</p>
+            </li>
+            <li class="step" data-step="5">
+              <span class="step-num">05</span>
+              <h3>Then we rebuild the moment — with you in it.</h3>
+              <p>The AI picks the angle the data actually supports.</p>
+            </li>
+            <li class="step" data-step="6">
+              <span class="step-num">06</span>
+              <h3>A cinematic recap. From angles that never existed.</h3>
+              <p>Your day, as if a film crew had quietly followed you.</p>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 5 — TRIGGERS                                             -->
+    <!-- ====================================================== -->
+    <section id="triggers" class="triggers section-pad">
+      <div class="container center">
+        <p class="eyebrow reveal">What counts as meaningful</p>
+        <h2 class="display reveal">Six quiet signals. <em>One decision.</em></h2>
+
+        <div class="trigger-ring reveal" role="list">
+          <button class="trig" data-trig="motion" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19l7-7 4 4 3-3"/><path d="M14 6h6v6"/></svg>
+          </button>
+          <button class="trig" data-trig="audio" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2l2-7 4 14 3-10 2 5h5"/></svg>
+          </button>
+          <button class="trig" data-trig="face" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+          </button>
+          <button class="trig" data-trig="place" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>
+          </button>
+          <button class="trig" data-trig="heart" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 8.6a5.5 5.5 0 0 0-9.3-2.5L12 6.5l-.5-.4a5.5 5.5 0 1 0-7.8 7.7l7.6 7.7c.4.4 1 .4 1.4 0l7.6-7.7a5.5 5.5 0 0 0 .5-5.2z"/></svg>
+          </button>
+          <button class="trig" data-trig="time" role="listitem">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </button>
+          <div class="ring-core" aria-hidden="true"><span class="ring-dot"></span></div>
+        </div>
+
+        <p class="trigger-detail reveal" aria-live="polite">Hover a signal to see what it listens for.</p>
+        <p class="caption reveal">Routine produces nothing. Novelty produces stories.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 6 — NOVELTY BASELINE                                     -->
+    <!-- ====================================================== -->
+    <section id="novelty" class="novelty section-pad">
+      <div class="container center">
+        <p class="eyebrow reveal">Novelty over routine</p>
+        <h2 class="display reveal">We learn your day — <em>so we notice when it isn't.</em></h2>
+
+        <div class="fingerprint reveal">
+          <svg viewBox="-120 -120 240 240" class="fp">
+            <g class="fp-baseline"></g>
+            <g class="fp-today"></g>
+            <circle cx="0" cy="0" r="36" class="fp-center"/>
+            <text x="0" y="-2" text-anchor="middle" class="fp-label">your day</text>
+            <text x="0" y="14" text-anchor="middle" class="fp-sub">today vs. usual</text>
+          </svg>
+          <div class="fp-toggle">
+            <button data-day="mon" class="active">Mon</button>
+            <button data-day="tue">Tue</button>
+            <button data-day="wed">Wed</button>
+            <button data-day="thu">Thu</button>
+            <button data-day="fri">Fri</button>
+            <button data-day="sat">Sat</button>
+          </div>
+        </div>
+
+        <p class="caption reveal">The unusual is what's worth remembering.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 7 — PRIVACY                                              -->
+    <!-- ====================================================== -->
+    <section id="privacy" class="privacy section-pad">
+      <div class="container center">
+        <p class="eyebrow reveal">Privacy isn't a setting</p>
+        <h2 class="display reveal">It's the <em>architecture.</em></h2>
+
+        <div class="flow reveal">
+          <svg viewBox="0 0 720 220" class="flow-svg">
+            <!-- glasses node -->
+            <g class="node node-glasses" transform="translate(80,110)">
+              <circle r="44" class="node-bg"/>
+              <text y="6" text-anchor="middle" class="node-label">glasses</text>
+            </g>
+            <!-- phone node -->
+            <g class="node node-phone" transform="translate(640,110)">
+              <rect x="-22" y="-36" width="44" height="72" rx="6" class="node-bg"/>
+              <text y="6" text-anchor="middle" class="node-label">phone</text>
+            </g>
+            <!-- buffer ring around glasses -->
+            <circle cx="80" cy="110" r="64" fill="none" stroke="rgba(255,255,255,.08)" stroke-dasharray="3 4"/>
+            <!-- transfer track -->
+            <line x1="144" y1="110" x2="618" y2="110" stroke="rgba(255,255,255,.08)" stroke-width="1" stroke-dasharray="2 4"/>
+            <g class="flow-particles"></g>
+            <g class="flow-saved"></g>
+          </svg>
+        </div>
+
+        <ul class="pill-list reveal">
+          <li>Continuous stream never leaves the glasses.</li>
+          <li>You can erase any moment, any day.</li>
+          <li>Capture-free zones are honored automatically.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 8 — CONFIDENCE                                           -->
+    <!-- ====================================================== -->
+    <section id="confidence" class="confidence section-pad">
+      <div class="container center">
+        <p class="eyebrow reveal">Confidence-driven</p>
+        <h2 class="display reveal">We never <em>invent</em> what we don't see.</h2>
+
+        <div class="torch reveal">
+          <img src="images/reconstruction-scene.jpg" class="torch-base" alt="" onerror="this.replaceWith(makePlaceholder('reconstruction-scene.jpg','Reconstructed scene'))" />
+          <img src="images/confidence-heatmap.png" class="torch-heat" alt="" onerror="this.replaceWith(makePlaceholder('confidence-heatmap.png','Confidence heatmap overlay', true))" />
+          <div class="torch-mask" aria-hidden="true"></div>
+          <div class="torch-hint">move your cursor to reveal what we know</div>
+        </div>
+
+        <p class="caption reveal">Only angles backed by data become memories.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 9 — ANGLE SELECTION                                      -->
+    <!-- ====================================================== -->
+    <section id="angles" class="angles-sec section-pad">
+      <div class="container center">
+        <p class="eyebrow reveal">The shot</p>
+        <h2 class="display reveal">Nine possible angles. <em>One winner.</em></h2>
+
+        <div class="angle-picker reveal">
+          <div class="ap-stage">
+            <img src="images/angle-variant-a.jpg" class="ap-img active" data-angle="a" alt="" onerror="this.replaceWith(makePlaceholder('angle-variant-a.jpg','Angle A — low front'))" />
+            <img src="images/angle-variant-b.jpg" class="ap-img" data-angle="b" alt="" onerror="this.replaceWith(makePlaceholder('angle-variant-b.jpg','Angle B — high corner'))" />
+            <img src="images/angle-variant-c.jpg" class="ap-img" data-angle="c" alt="" onerror="this.replaceWith(makePlaceholder('angle-variant-c.jpg','Angle C — eye level'))" />
+            <div class="ap-label">
+              <span class="ap-score mono">0.84</span>
+              <span class="ap-name">selected</span>
+            </div>
+          </div>
+          <div class="ap-ring"></div>
+        </div>
+
+        <p class="caption reveal">Each candidate is scored on what we actually have. The system picks the angle most truthful to the data.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== -->
+    <!-- 10 — CLOSING                                             -->
+    <!-- ====================================================== -->
+    <section id="closing" class="closing section-pad">
+      <div class="container narrow center">
+        <h2 class="display reveal">Your life, finally remembered <em>the way you lived it.</em></h2>
+        <a class="cta reveal" href="feature.html">
+          <span>See the reel</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span>3P · concept · 2026</span>
+    <span>vpaulj@gmail.com</span>
+  </footer>
+
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+
+  <script src="script.js"></script>
+</body>
+</html>
