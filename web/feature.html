@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3P — Daily Highlight Reel</title>
+  <meta name="description" content="The flagship feature enabled by 3P — an auto-generated cinematic recap of your day." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .feature-stub {
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center;
+      padding: 120px 32px;
+    }
+    .feature-stub .eyebrow { color: var(--warm); }
+    .feature-stub .display { font-size: clamp(48px, 7.4vw, 96px); }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-top: 56px;
+      padding: 12px 22px;
+      border: 1px solid var(--line-2);
+      border-radius: 999px;
+      font-size: 13.5px;
+      color: var(--text);
+      transition: background 0.3s var(--ease);
+    }
+    .back-link:hover { background: var(--surface); }
+    .soon-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-top: 24px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: var(--warm-soft);
+      color: var(--warm);
+      font-size: 11px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+    }
+    .soon-badge .pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--warm);
+      box-shadow: 0 0 8px var(--warm);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  </style>
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a href="index.html" class="wordmark">
+      <span class="dot"></span>
+      <span>3P</span>
+    </a>
+    <nav class="topnav">
+      <a href="index.html#gap">Story</a>
+      <a href="index.html#how">How</a>
+      <a href="index.html#privacy">Privacy</a>
+      <a href="feature.html">Reel</a>
+    </nav>
+  </header>
+
+  <main class="feature-stub">
+    <p class="eyebrow">The feature</p>
+    <h1 class="display">Your <em>Daily Highlight Reel.</em></h1>
+    <p class="sub">An auto-generated cinematic recap of your day — with you, finally, in the frame.</p>
+    <span class="soon-badge"><span class="pulse"></span>Coming soon</span>
+
+    <a class="back-link" href="index.html">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg>
+      Back to the story
+    </a>
+  </main>
+
+  <footer class="foot">
+    <span>3P · concept · 2026</span>
+    <span>vpaulj@gmail.com</span>
+  </footer>
+</body>
+</html>
