@@ -9,6 +9,291 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
    so img onerror handlers can call it before this file loads.
    ---------------------------------------------------------- */
 
+/* ============================================================
+   Memory constellation — fixed, mouse-reactive background
+   A sparse grid of tiny "memory frame" icons connected by
+   faint amber threads. Nearby cells brighten and drift toward
+   the cursor. Subtle by design — felt, not stared at.
+   ============================================================ */
+(function initBgCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d', { alpha: true });
+  if (!ctx) return;
+
+  // ---- config ----------------------------------------------
+  const CELL_W = 150;          // grid cell size (px)
+  const CELL_H = 105;
+  const FRAME_PAD = 22;        // padding inside cell for the frame
+  const ACTIVE_RATE = 0.45;    // fraction of cells with a frame
+  const CONNECT_RATE = 0.42;   // fraction of adjacent active-pairs to connect
+  const PARALLAX_X = 14;       // max px drift on X at depth=1
+  const PARALLAX_Y = 10;
+  const PROX_RADIUS = 220;     // mouse proximity falloff (px)
+  const PROX_BOOST = 0.55;     // max alpha multiplier added near cursor
+  const BASE_ALPHA = 0.085;    // frames are very faint at rest
+  const LINE_ALPHA = 0.045;
+  const NODE_ALPHA = 0.11;
+  const WARM = [255, 184, 107];
+
+  // simple seeded PRNG so the constellation is stable across redraws
+  function mulberry32(seed) {
+    return function () {
+      let t = (seed += 0x6D2B79F5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---- state -----------------------------------------------
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0;
+  let cols = 0, rows = 0;
+  let cells = [];           // [{cx,cy,active,depth,iconType,seed}]
+  let edges = [];           // [{a,b}] indices into cells
+  let mx = 0.5, my = 0.5;   // target normalized mouse
+  let smx = 0.5, smy = 0.5; // smoothed
+  let rafId = 0;
+  let mobile = window.innerWidth < 720;
+  let isStatic = reduceMotion || mobile;
+
+  // ---- build grid (called on init and resize) --------------
+  function buildGrid() {
+    cols = Math.ceil(W / CELL_W) + 2;  // bleed by 1 cell each side
+    rows = Math.ceil(H / CELL_H) + 2;
+    const originX = -CELL_W;
+    const originY = -CELL_H;
+    const rand = mulberry32(1337);
+    cells = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const jitterX = (rand() - 0.5) * 14;
+        const jitterY = (rand() - 0.5) * 10;
+        const active = rand() < ACTIVE_RATE;
+        cells.push({
+          col: c, row: r,
+          cx: originX + c * CELL_W + CELL_W / 2 + jitterX,
+          cy: originY + r * CELL_H + CELL_H / 2 + jitterY,
+          active: active,
+          depth: 0.25 + rand() * 0.75,
+          iconType: Math.floor(rand() * 5),   // 0..4
+          // small per-cell phase for ambient breathing
+          phase: rand() * Math.PI * 2,
+          // per-cell scale tweak so frames aren't all identical size
+          scale: 0.85 + rand() * 0.4,
+        });
+      }
+    }
+    // build edges between adjacent active cells (right & down only, avoid dupes)
+    edges = [];
+    const rand2 = mulberry32(4242);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (!cells[i].active) continue;
+        // right neighbor
+        if (c + 1 < cols) {
+          const j = r * cols + (c + 1);
+          if (cells[j].active && rand2() < CONNECT_RATE) edges.push({ a: i, b: j });
+        }
+        // down neighbor
+        if (r + 1 < rows) {
+          const j = (r + 1) * cols + c;
+          if (cells[j].active && rand2() < CONNECT_RATE) edges.push({ a: i, b: j });
+        }
+        // occasional diagonal for variety
+        if (c + 1 < cols && r + 1 < rows) {
+          const j = (r + 1) * cols + (c + 1);
+          if (cells[j].active && rand2() < CONNECT_RATE * 0.5) edges.push({ a: i, b: j });
+        }
+      }
+    }
+  }
+
+  // ---- resize ----------------------------------------------
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    mobile = W < 720;
+    isStatic = reduceMotion || mobile;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildGrid();
+    if (isStatic) drawOnce();
+  }
+
+  let resizeT;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(resize, 180);
+  });
+
+  // ---- mouse tracking --------------------------------------
+  window.addEventListener('mousemove', (e) => {
+    mx = e.clientX / W;
+    my = e.clientY / H;
+  }, { passive: true });
+
+  // ---- icon drawing ----------------------------------------
+  // Draw a tiny memory frame at (cx, cy) with given alpha and scale.
+  // iconType: 0=aperture, 1=play, 2=hex, 3=glasses, 4=sensor-grid
+  function drawFrame(cell, dx, dy, alpha) {
+    const x = cell.cx + dx;
+    const y = cell.cy + dy;
+    const fw = (CELL_W - FRAME_PAD * 2) * cell.scale;
+    const fh = (CELL_H - FRAME_PAD * 2) * cell.scale;
+    const fx = x - fw / 2;
+    const fy = y - fh / 2;
+    const a = Math.max(0, Math.min(1, alpha));
+    const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
+
+    // soft inner fill (gives the photo-frame the dim "image area" look)
+    ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
+    ctx.fillRect(fx, fy, fw, fh);
+
+    // outer frame stroke
+    ctx.strokeStyle = warm + (a * 0.85) + ')';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
+
+    // tiny L-corner accents (film-frame feel) — top-left + bottom-right only
+    const corn = 4;
+    ctx.strokeStyle = warm + (a * 1.4) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
+    ctx.moveTo(fx + fw + 1, fy + fh - corn); ctx.lineTo(fx + fw + 1, fy + fh + 1); ctx.lineTo(fx + fw - corn, fy + fh + 1);
+    ctx.stroke();
+
+    // inner icon
+    const ix = x, iy = y;
+    const r = Math.min(fw, fh) * 0.18;
+    ctx.strokeStyle = warm + (a * 1.1) + ')';
+    ctx.fillStyle = warm + (a * 1.1) + ')';
+    ctx.lineWidth = 1;
+    switch (cell.iconType) {
+      case 0: // aperture: 2 concentric circles
+        ctx.beginPath(); ctx.arc(ix, iy, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(ix, iy, r * 0.45, 0, Math.PI * 2); ctx.stroke();
+        break;
+      case 1: // play triangle
+        ctx.beginPath();
+        ctx.moveTo(ix - r * 0.7, iy - r);
+        ctx.lineTo(ix + r, iy);
+        ctx.lineTo(ix - r * 0.7, iy + r);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 2: // hexagon wireframe
+        ctx.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const ang = (Math.PI / 3) * k - Math.PI / 6;
+          const px = ix + Math.cos(ang) * r;
+          const py = iy + Math.sin(ang) * r;
+          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      case 3: // glasses (two small circles + bridge)
+        ctx.beginPath(); ctx.arc(ix - r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(ix + r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ix - r * 0.18, iy); ctx.lineTo(ix + r * 0.18, iy); ctx.stroke();
+        break;
+      case 4: // 2x2 sensor grid of dots
+        const off = r * 0.45;
+        for (let dxk = -1; dxk <= 1; dxk += 2) {
+          for (let dyk = -1; dyk <= 1; dyk += 2) {
+            ctx.beginPath();
+            ctx.arc(ix + dxk * off, iy + dyk * off, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+    }
+  }
+
+  // ---- draw loop -------------------------------------------
+  function alphaForCell(cell, dx, dy) {
+    const x = cell.cx + dx;
+    const y = cell.cy + dy;
+    // off-screen? skip
+    if (x < -CELL_W || x > W + CELL_W || y < -CELL_H || y > H + CELL_H) return -1;
+    const px = mx * W, py = my * H;
+    const distSq = (x - px) * (x - px) + (y - py) * (y - py);
+    if (distSq > PROX_RADIUS * PROX_RADIUS) return BASE_ALPHA;
+    const dist = Math.sqrt(distSq);
+    const boost = (1 - dist / PROX_RADIUS) * PROX_BOOST;
+    return BASE_ALPHA + boost;
+  }
+
+  function draw(time) {
+    // smooth mouse
+    smx += (mx - smx) * 0.07;
+    smy += (my - smy) * 0.07;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.015;
+
+    // 1) edges first (so frames sit on top)
+    for (const e of edges) {
+      const A = cells[e.a], B = cells[e.b];
+      const dxA = (smx - 0.5) * PARALLAX_X * A.depth;
+      const dyA = (smy - 0.5) * PARALLAX_Y * A.depth;
+      const dxB = (smx - 0.5) * PARALLAX_X * B.depth;
+      const dyB = (smy - 0.5) * PARALLAX_Y * B.depth;
+      // average proximity for the edge
+      const aA = alphaForCell(A, dxA, dyA);
+      const aB = alphaForCell(B, dxB, dyB);
+      if (aA < 0 && aB < 0) continue;
+      const avg = ((aA < 0 ? BASE_ALPHA : aA) + (aB < 0 ? BASE_ALPHA : aB)) / 2;
+      const lineA = LINE_ALPHA + (avg - BASE_ALPHA) * 0.7 + breathing;
+      ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${Math.max(0, lineA)})`;
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(A.cx + dxA, A.cy + dyA);
+      ctx.lineTo(B.cx + dxB, B.cy + dyB);
+      ctx.stroke();
+    }
+
+    // 2) frames + center nodes
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      if (!cell.active) continue;
+      const dx = (smx - 0.5) * PARALLAX_X * cell.depth;
+      const dy = (smy - 0.5) * PARALLAX_Y * cell.depth;
+      const a = alphaForCell(cell, dx, dy);
+      if (a < 0) continue;
+      drawFrame(cell, dx, dy, a + breathing);
+      // tiny center node dot
+      ctx.fillStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${NODE_ALPHA + (a - BASE_ALPHA) * 1.2})`;
+      ctx.beginPath();
+      ctx.arc(cell.cx + dx, cell.cy + dy, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (!isStatic) rafId = requestAnimationFrame(draw);
+  }
+
+  function drawOnce() {
+    // static render: center mouse so the parallax is neutral
+    smx = 0.5; smy = 0.5;
+    cancelAnimationFrame(rafId);
+    draw(0);
+  }
+
+  // ---- boot -----------------------------------------------
+  resize();
+  if (!isStatic) rafId = requestAnimationFrame(draw);
+})();
+
+
 /* ----------------------------------------------------------
    Smooth scroll — Lenis
    ---------------------------------------------------------- */
