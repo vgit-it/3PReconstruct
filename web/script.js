@@ -38,7 +38,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const WARM = [255, 184, 107];
 
   // ---- POV thumbnail sheet ---------------------------------
-  const SHEET_COLS = 10, SHEET_ROWS = 10;
+  const SHEET_COLS = 9, SHEET_ROWS = 9;
   const sheet = new Image();
   let sheetReady = false;
   let cellPxW = 0, cellPxH = 0;
