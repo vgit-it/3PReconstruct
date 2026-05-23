@@ -10,11 +10,12 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
    ---------------------------------------------------------- */
 
 /* ============================================================
-   Memory volume — fixed, mouse-reactive 3D background (v2)
-   Frames live in 5 depth bands. Near frames are larger, brighter,
-   and swing strongly with the cursor; far frames are tiny, dim,
-   and barely move. The differential parallax across bands is
-   what reads as 3D depth.
+   Memory volume — fixed, cursor-driven background (v3)
+   The cursor opens a depth well in the memory field: frames
+   under it sink back, frames at the rim brighten and push
+   outward. Threads between them stretch radially — a glowing
+   ring of "reconstructed angles" emerges around your attention.
+   When the cursor is still, a faint capture-pulse ticks out.
    ============================================================ */
 (function initBgCanvas() {
   const canvas = document.getElementById('bg-canvas');
@@ -22,24 +23,36 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const ctx = canvas.getContext('2d', { alpha: true });
   if (!ctx) return;
 
-  // ---- depth bands (0 = foreground, 4 = distant) -----------
+  // ---- depth bands (visual depth only — no parallax) -------
   const BANDS = [
-    { scale: 1.40, alpha: 0.18, stroke: 1.5,  pxX: 60, pxY: 38, weight: 0.08, proxMul: 1.00 },
-    { scale: 1.10, alpha: 0.13, stroke: 1.0,  pxX: 40, pxY: 26, weight: 0.14, proxMul: 0.85 },
-    { scale: 0.85, alpha: 0.09, stroke: 0.75, pxX: 25, pxY: 16, weight: 0.20, proxMul: 0.65 },
-    { scale: 0.60, alpha: 0.06, stroke: 0.5,  pxX: 12, pxY: 8,  weight: 0.26, proxMul: 0.45 },
-    { scale: 0.40, alpha: 0.04, stroke: 0.4,  pxX:  4, pxY: 3,  weight: 0.32, proxMul: 0.25 },
+    { scale: 1.40, alpha: 0.18, stroke: 1.5,  weight: 0.08 },
+    { scale: 1.10, alpha: 0.13, stroke: 1.0,  weight: 0.14 },
+    { scale: 0.85, alpha: 0.09, stroke: 0.75, weight: 0.20 },
+    { scale: 0.60, alpha: 0.06, stroke: 0.5,  weight: 0.26 },
+    { scale: 0.40, alpha: 0.04, stroke: 0.4,  weight: 0.32 },
   ];
-  const BASE_FW = 110;          // nominal frame width at scale 1
-  const BASE_FH = 70;
-  const DENSITY = 6800;         // px² per frame
-  const PROX_RADIUS = 240;
-  const PROX_BOOST = 0.20;      // max additive alpha near cursor (scaled by band)
+  const BASE_FW = 110, BASE_FH = 70;
+  const DENSITY = 6800;
   const CONN_RADIUS = 210;
   const CONN_RATE = 0.34;
   const WARM = [255, 184, 107];
 
-  // simple seeded PRNG so the constellation is stable across redraws
+  // ---- depth well ------------------------------------------
+  const WELL_RADIUS = 230;
+  const INNER_FRAC = 0.58;
+  const SINK_SCALE = 0.22;
+  const SINK_ALPHA = 0.12;
+  const RIM_SCALE_BOOST = 0.40;
+  const RIM_ALPHA_BOOST = 2.20;
+  const RIM_PUSH_PX = 32;
+
+  // ---- pulse -----------------------------------------------
+  const PULSE_DELAY = 600;      // ms still before pulse fires
+  const PULSE_INTERVAL = 2800;  // ms between pulses while idle
+  const PULSE_DURATION = 1400;
+  const PULSE_MAX_R = WELL_RADIUS * 1.6;
+  const PULSE_ALPHA = 0.085;
+
   function mulberry32(seed) {
     return function () {
       let t = (seed += 0x6D2B79F5);
@@ -52,14 +65,17 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   // ---- state -----------------------------------------------
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W = 0, H = 0;
-  let frames = [];              // [{x,y,band,iconKind,jx,jy}]
-  let bandIndex = [];           // [[idx,...], ...] frames grouped by band
-  let edgesByBand = [];         // [[{a,b},...], ...] edges, keyed by nearer endpoint's band
-  let mx = 0.5, my = 0.5;
+  let frames = [];
+  let bandIndex = [];
+  let edges = [];
+  let wellCache = [];      // pre-allocated {dx,dy,scaleM,alphaM} per frame
+  let mx = -1, my = -1;    // normalized 0..1; <0 means cursor outside
   let smx = 0.5, smy = 0.5;
   let rafId = 0;
   let mobile = window.innerWidth < 720;
   let isStatic = reduceMotion || mobile;
+  let lastMoveTime = 0;
+  let pulse = { active: false, r: 0, startTime: 0 };
 
   // ---- build (called on init and resize) -------------------
   function buildGrid() {
@@ -70,9 +86,8 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
     frames = [];
     bandIndex = BANDS.map(() => []);
-    edgesByBand = BANDS.map(() => []);
+    wellCache = [];
 
-    // cumulative weights for band sampling
     const cum = [];
     let acc = 0;
     for (const b of BANDS) { acc += b.weight; cum.push(acc); }
@@ -88,11 +103,12 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       const jy = (rand() - 0.5) * 1.5;
       frames.push({ x, y, band, iconKind, jx, jy });
       bandIndex[band].push(i);
+      wellCache.push({ dx: jx, dy: jy, scaleM: 1, alphaM: 1 });
     }
 
-    // edges: for each frame, link up to 2 nearest others within CONN_RADIUS
-    // with probability CONN_RATE. Bucket by the nearer endpoint's band so
-    // we can render back-to-front with edges interleaved correctly.
+    // edges: flat list (no per-band buckets needed — endpoints displace
+    // identically since there's no global parallax anymore)
+    edges = [];
     const seen = new Set();
     const erand = mulberry32(0xC0FFEE);
     for (let i = 0; i < frames.length; i++) {
@@ -113,8 +129,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         if (seen.has(key)) continue;
         if (erand() < CONN_RATE) {
           seen.add(key);
-          const nearerBand = Math.min(frames[i].band, frames[j].band);
-          edgesByBand[nearerBand].push({ a: i, b: j });
+          edges.push({ a: i, b: j });
         }
       }
     }
@@ -146,48 +161,80 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   window.addEventListener('mousemove', (e) => {
     mx = e.clientX / W;
     my = e.clientY / H;
+    lastMoveTime = performance.now();
+    // abort a very young pulse so it doesn't smear with cursor motion
+    if (pulse.active && (lastMoveTime - pulse.startTime) < 200) pulse.active = false;
   }, { passive: true });
 
-  // ---- per-frame alpha including proximity boost -----------
-  function alphaForFrame(f, dx, dy) {
-    const band = BANDS[f.band];
-    const x = f.x + dx;
-    const y = f.y + dy;
-    if (x < -BASE_FW || x > W + BASE_FW || y < -BASE_FH || y > H + BASE_FH) return -1;
-    const px = mx * W, py = my * H;
-    const dxm = x - px, dym = y - py;
-    const d2 = dxm * dxm + dym * dym;
-    if (d2 > PROX_RADIUS * PROX_RADIUS) return band.alpha;
-    const dist = Math.sqrt(d2);
-    const boost = (1 - dist / PROX_RADIUS) * PROX_BOOST * band.proxMul;
-    return band.alpha + boost;
+  window.addEventListener('mouseleave', () => { mx = -1; my = -1; });
+  window.addEventListener('blur', () => { mx = -1; my = -1; });
+
+  // ---- well profile (fills wellCache in-place) -------------
+  function computeWell() {
+    if (mx < 0 || isStatic) {
+      // no cursor → all neutral
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        const w = wellCache[i];
+        w.dx = f.jx; w.dy = f.jy; w.scaleM = 1; w.alphaM = 1;
+      }
+      return;
+    }
+    const cx = smx * W, cy = smy * H;
+    const invR = 1 / WELL_RADIUS;
+    const invInner = 1 / INNER_FRAC;
+    const invRim = 1 / (1 - INNER_FRAC);
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      const w = wellCache[i];
+      const ddx = f.x - cx, ddy = f.y - cy;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      const r = dist * invR;
+      if (r >= 1.0) {
+        w.dx = f.jx; w.dy = f.jy; w.scaleM = 1; w.alphaM = 1;
+        continue;
+      }
+      if (r < INNER_FRAC) {
+        const t = r * invInner;
+        w.scaleM = SINK_SCALE + (1 - SINK_SCALE) * t;
+        w.alphaM = SINK_ALPHA + (1 - SINK_ALPHA) * t;
+        w.dx = f.jx;
+        w.dy = f.jy;
+      } else {
+        const t = (r - INNER_FRAC) * invRim;
+        const rim = Math.sin(t * Math.PI);
+        w.scaleM = 1 + rim * RIM_SCALE_BOOST;
+        w.alphaM = 1 + rim * RIM_ALPHA_BOOST;
+        const push = rim * RIM_PUSH_PX;
+        const inv = dist > 0.0001 ? 1 / dist : 0;
+        w.dx = f.jx + ddx * inv * push;
+        w.dy = f.jy + ddy * inv * push;
+      }
+    }
   }
 
   // ---- icon drawing ----------------------------------------
-  // iconKind: 0=aperture, 1=play, 2=hex, 3=glasses, 4=sensor-grid
-  function drawFrame(f, dx, dy, alpha) {
+  function drawFrame(f, dx, dy, alpha, scaleOverride) {
     const band = BANDS[f.band];
+    const totalScale = band.scale * scaleOverride;
     const x = f.x + dx;
     const y = f.y + dy;
-    const fw = BASE_FW * band.scale;
-    const fh = BASE_FH * band.scale;
+    const fw = BASE_FW * totalScale;
+    const fh = BASE_FH * totalScale;
     const fx = x - fw / 2;
     const fy = y - fh / 2;
     const a = Math.max(0, Math.min(1, alpha));
     const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
 
-    // soft inner fill (gives each frame a dim "image area" feel)
     ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
     ctx.fillRect(fx, fy, fw, fh);
 
-    // outer frame stroke
     ctx.strokeStyle = warm + (a * 0.9) + ')';
     ctx.lineWidth = band.stroke;
     ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
 
-    // L-corner accents — skip on tiny distant frames
-    if (band.scale > 0.55) {
-      const corn = 4 * band.scale;
+    if (totalScale > 0.55) {
+      const corn = 4 * totalScale;
       ctx.strokeStyle = warm + (a * 1.5) + ')';
       ctx.beginPath();
       ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
@@ -195,8 +242,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       ctx.stroke();
     }
 
-    // inner icon — only on bands where it'll read
-    if (band.scale > 0.5) {
+    if (totalScale > 0.5) {
       const ix = x, iy = y;
       const r = Math.min(fw, fh) * 0.18;
       ctx.strokeStyle = warm + (a * 1.15) + ')';
@@ -236,7 +282,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
           for (let dxk = -1; dxk <= 1; dxk += 2) {
             for (let dyk = -1; dyk <= 1; dyk += 2) {
               ctx.beginPath();
-              ctx.arc(ix + dxk * off, iy + dyk * off, 1.2 * band.scale, 0, Math.PI * 2);
+              ctx.arc(ix + dxk * off, iy + dyk * off, 1.2 * totalScale, 0, Math.PI * 2);
               ctx.fill();
             }
           }
@@ -245,59 +291,86 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       }
     }
 
-    // center anchor dot — drawn even on distant band so it reads as a "star"
     ctx.fillStyle = warm + (a * 1.3) + ')';
     ctx.beginPath();
-    ctx.arc(x, y, Math.max(0.7, 1.5 * band.scale), 0, Math.PI * 2);
+    ctx.arc(x, y, Math.max(0.7, 1.5 * totalScale), 0, Math.PI * 2);
     ctx.fill();
   }
 
   // ---- draw loop -------------------------------------------
   function draw(time) {
-    smx += (mx - smx) * 0.12;
-    smy += (my - smy) * 0.12;
+    // smooth cursor (only used when mx >= 0)
+    if (mx >= 0) {
+      smx += (mx - smx) * 0.10;
+      smy += (my - smy) * 0.10;
+    }
 
     ctx.clearRect(0, 0, W, H);
 
-    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.04;
-    const cx = smx - 0.5;
-    const cy = smy - 0.5;
+    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.035;
 
-    // back-to-front: distant band first, foreground last
+    computeWell();
+
+    // edges first — the spoke effect emerges naturally from per-endpoint
+    // displacement (sunk frames pull threads short; rim frames stretch them out)
+    for (let e = 0; e < edges.length; e++) {
+      const edge = edges[e];
+      const A = frames[edge.a], B = frames[edge.b];
+      const wA = wellCache[edge.a], wB = wellCache[edge.b];
+      const bA = BANDS[A.band], bB = BANDS[B.band];
+      const baseLineA = Math.min(bA.alpha, bB.alpha) * 0.5;
+      const lineA = baseLineA * Math.min(wA.alphaM, wB.alphaM) + breathing * 0.25;
+      if (lineA < 0.004) continue;
+      ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${Math.max(0, lineA)})`;
+      ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(A.x + wA.dx, A.y + wA.dy);
+      ctx.lineTo(B.x + wB.dx, B.y + wB.dy);
+      ctx.stroke();
+    }
+
+    // frames back-to-front
     for (let bIdx = BANDS.length - 1; bIdx >= 0; bIdx--) {
-      // 1) edges whose nearer endpoint is in this band
-      for (const e of edgesByBand[bIdx]) {
-        const A = frames[e.a], B = frames[e.b];
-        const bA = BANDS[A.band], bB = BANDS[B.band];
-        const dxA = -cx * bA.pxX * 2 + A.jx;
-        const dyA = -cy * bA.pxY * 2 + A.jy;
-        const dxB = -cx * bB.pxX * 2 + B.jx;
-        const dyB = -cy * bB.pxY * 2 + B.jy;
-        const aA = alphaForFrame(A, dxA, dyA);
-        const aB = alphaForFrame(B, dxB, dyB);
-        if (aA < 0 && aB < 0) continue;
-        const baseLineA = Math.min(bA.alpha, bB.alpha) * 0.5;
-        const boost = ((aA < 0 ? 0 : aA - bA.alpha) + (aB < 0 ? 0 : aB - bB.alpha)) * 0.55;
-        const lineA = Math.max(0, baseLineA + boost + breathing * 0.3);
-        ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${lineA})`;
-        ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7;
-        ctx.beginPath();
-        ctx.moveTo(A.x + dxA, A.y + dyA);
-        ctx.lineTo(B.x + dxB, B.y + dyB);
-        ctx.stroke();
-      }
-
-      // 2) frames in this band
       const band = BANDS[bIdx];
-      const dxBase = -cx * band.pxX * 2;
-      const dyBase = -cy * band.pxY * 2;
-      for (const i of bandIndex[bIdx]) {
+      const list = bandIndex[bIdx];
+      for (let k = 0; k < list.length; k++) {
+        const i = list[k];
         const f = frames[i];
-        const dx = dxBase + f.jx;
-        const dy = dyBase + f.jy;
-        const a = alphaForFrame(f, dx, dy);
-        if (a < 0) continue;
-        drawFrame(f, dx, dy, a + breathing);
+        const w = wellCache[i];
+        const x = f.x + w.dx, y = f.y + w.dy;
+        if (x < -BASE_FW * 2 || x > W + BASE_FW * 2 || y < -BASE_FH * 2 || y > H + BASE_FH * 2) continue;
+        const a = band.alpha * w.alphaM + breathing;
+        if (a < 0.004) continue;
+        drawFrame(f, w.dx, w.dy, Math.min(1, a), w.scaleM);
+      }
+    }
+
+    // idle capture pulse
+    if (!isStatic && mx >= 0) {
+      const now = time || 0;
+      const elapsed = now - lastMoveTime;
+      if (!pulse.active && elapsed > PULSE_DELAY) {
+        // fire a pulse, then again every PULSE_INTERVAL while idle
+        const since = elapsed - PULSE_DELAY;
+        const phase = since % PULSE_INTERVAL;
+        if (phase < PULSE_DURATION) {
+          pulse.active = true;
+          pulse.startTime = now - phase;
+        }
+      }
+      if (pulse.active) {
+        const p = (now - pulse.startTime) / PULSE_DURATION;
+        if (p >= 1) {
+          pulse.active = false;
+        } else {
+          pulse.r = p * PULSE_MAX_R;
+          const pa = Math.sin(p * Math.PI) * PULSE_ALPHA;
+          ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${pa})`;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(smx * W, smy * H, pulse.r, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
     }
 
@@ -305,15 +378,17 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   }
 
   function drawOnce() {
-    // static render: center mouse so the parallax is neutral
-    smx = 0.5; smy = 0.5;
+    // static render: neutralise the well
+    mx = -1; my = -1;
     cancelAnimationFrame(rafId);
     draw(0);
   }
 
-  // ---- boot -----------------------------------------------
   resize();
-  if (!isStatic) rafId = requestAnimationFrame(draw);
+  if (!isStatic) {
+    lastMoveTime = performance.now();
+    rafId = requestAnimationFrame(draw);
+  }
 })();
 
 
