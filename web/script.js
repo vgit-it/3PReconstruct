@@ -25,17 +25,31 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
   // ---- depth bands (visual depth only — no parallax) -------
   const BANDS = [
-    { scale: 1.40, alpha: 0.09,  stroke: 1.5,  weight: 0.08 },
-    { scale: 1.10, alpha: 0.065, stroke: 1.0,  weight: 0.14 },
-    { scale: 0.85, alpha: 0.045, stroke: 0.75, weight: 0.20 },
-    { scale: 0.60, alpha: 0.030, stroke: 0.5,  weight: 0.26 },
-    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32 },
+    { scale: 1.40, alpha: 0.050, stroke: 1.5,  weight: 0.08 },
+    { scale: 1.10, alpha: 0.038, stroke: 1.0,  weight: 0.14 },
+    { scale: 0.85, alpha: 0.026, stroke: 0.75, weight: 0.20 },
+    { scale: 0.60, alpha: 0.018, stroke: 0.5,  weight: 0.26 },
+    { scale: 0.40, alpha: 0.012, stroke: 0.4,  weight: 0.32 },
   ];
   const BASE_FW = 110, BASE_FH = 70;
   const DENSITY = 6800;
   const CONN_RADIUS = 210;
   const CONN_RATE = 0.34;
   const WARM = [255, 184, 107];
+
+  // ---- POV thumbnail sheet ---------------------------------
+  const SHEET_COLS = 10, SHEET_ROWS = 10;
+  const sheet = new Image();
+  let sheetReady = false;
+  let cellPxW = 0, cellPxH = 0;
+  sheet.onload = () => {
+    if (!sheet.naturalWidth) return;
+    sheetReady = true;
+    cellPxW = sheet.naturalWidth / SHEET_COLS;
+    cellPxH = sheet.naturalHeight / SHEET_ROWS;
+    if (isStatic) drawOnce();
+  };
+  sheet.src = 'images/pov-sheet.png';
 
   // ---- depth well ------------------------------------------
   const WELL_RADIUS = 230;
@@ -99,9 +113,10 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       const x = -bleed + rand() * (W + bleed * 2);
       const y = -bleed + rand() * (H + bleed * 2);
       const iconKind = Math.floor(rand() * 5);
+      const spriteIdx = Math.floor(rand() * SHEET_COLS * SHEET_ROWS);
       const jx = (rand() - 0.5) * 2;
       const jy = (rand() - 0.5) * 1.5;
-      frames.push({ x, y, band, iconKind, jx, jy });
+      frames.push({ x, y, band, iconKind, spriteIdx, jx, jy });
       bandIndex[band].push(i);
       wellCache.push({ dx: jx, dy: jy, scaleM: 1, alphaM: 1 });
     }
@@ -147,6 +162,8 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low';
     buildGrid();
     if (isStatic) drawOnce();
   }
@@ -226,8 +243,30 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     const a = Math.max(0, Math.min(1, alpha));
     const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
 
-    ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
-    ctx.fillRect(fx, fy, fw, fh);
+    if (sheetReady) {
+      // POV thumbnail from sprite sheet, center-cropped to frame aspect
+      const col = f.spriteIdx % SHEET_COLS;
+      const row = (f.spriteIdx / SHEET_COLS) | 0;
+      const cellAR = cellPxW / cellPxH;
+      const frameAR = fw / fh;
+      let sw, sh, sx, sy;
+      if (cellAR > frameAR) {
+        sh = cellPxH; sw = cellPxH * frameAR;
+        sx = col * cellPxW + (cellPxW - sw) / 2;
+        sy = row * cellPxH;
+      } else {
+        sw = cellPxW; sh = cellPxW / frameAR;
+        sx = col * cellPxW;
+        sy = row * cellPxH + (cellPxH - sh) / 2;
+      }
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = Math.min(1, a * 0.85);
+      ctx.drawImage(sheet, sx, sy, sw, sh, fx, fy, fw, fh);
+      ctx.globalAlpha = prevAlpha;
+    } else {
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
+      ctx.fillRect(fx, fy, fw, fh);
+    }
 
     ctx.strokeStyle = warm + (a * 0.9) + ')';
     ctx.lineWidth = band.stroke;
@@ -242,7 +281,8 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       ctx.stroke();
     }
 
-    if (totalScale > 0.5) {
+    if (!sheetReady && totalScale > 0.5) {
+      // fallback icons while the sheet loads
       const ix = x, iy = y;
       const r = Math.min(fw, fh) * 0.18;
       ctx.strokeStyle = warm + (a * 1.15) + ')';
