@@ -52,6 +52,21 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 ::selection { background: var(--warm); color: #08080A; }
 
 /* ------------------------------------------------------------
+   Memory constellation background (canvas)
+   Fixed; mouse-reactive. Drawn behind all content but above body bg.
+   ------------------------------------------------------------ */
+#bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+}
+main, .foot { position: relative; z-index: 1; }
+
+/* ------------------------------------------------------------
    Film-grain overlay
    ------------------------------------------------------------ */
 .grain {
