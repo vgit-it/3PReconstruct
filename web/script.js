@@ -42,7 +42,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const WARM = [255, 184, 107];
 
   // ---- POV thumbnail sheet (color-graded on load) ----------
-  const SHEET_COLS = 10, SHEET_ROWS = 10;
+  const SHEET_COLS = 9, SHEET_ROWS = 9;
   const sheet = new Image();
   let sheetReady = false;
   let sheetSrc = null;  // either the Image or an offscreen canvas (graded)
@@ -73,7 +73,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const WELL_RADIUS = 230;
   const INNER_FRAC = 0.58;
   const SINK_SCALE = 0.55;
-  const SINK_ALPHA = 0.45;
+  const SINK_ALPHA = 0.55;
   const RIM_SCALE_BOOST = 0.16;
   const RIM_ALPHA_BOOST = 0.70;
   const RIM_PUSH_PX = 12;
