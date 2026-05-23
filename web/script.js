@@ -25,13 +25,13 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
   // ---- depth bands (visual depth only — no parallax) -------
   const BANDS = [
-    { scale: 1.40, alpha: 0.050, stroke: 1.5,  weight: 0.08 },
-    { scale: 1.10, alpha: 0.038, stroke: 1.0,  weight: 0.14 },
-    { scale: 0.85, alpha: 0.026, stroke: 0.75, weight: 0.20 },
-    { scale: 0.60, alpha: 0.018, stroke: 0.5,  weight: 0.26 },
-    { scale: 0.40, alpha: 0.012, stroke: 0.4,  weight: 0.32 },
+    { scale: 1.40, alpha: 0.110, stroke: 1.5,  weight: 0.08 },
+    { scale: 1.10, alpha: 0.080, stroke: 1.0,  weight: 0.14 },
+    { scale: 0.85, alpha: 0.055, stroke: 0.75, weight: 0.20 },
+    { scale: 0.60, alpha: 0.035, stroke: 0.5,  weight: 0.26 },
+    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32 },
   ];
-  const BASE_FW = 110, BASE_FH = 70;
+  const BASE_FS = 88;  // square — matches 1:1 source cells
   const DENSITY = 6800;
   const CONN_RADIUS = 210;
   const CONN_RATE = 0.34;
@@ -230,38 +230,26 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     }
   }
 
-  // ---- icon drawing ----------------------------------------
+  // ---- frame drawing ----------------------------------------
   function drawFrame(f, dx, dy, alpha, scaleOverride) {
     const band = BANDS[f.band];
     const totalScale = band.scale * scaleOverride;
     const x = f.x + dx;
     const y = f.y + dy;
-    const fw = BASE_FW * totalScale;
-    const fh = BASE_FH * totalScale;
+    const fw = BASE_FS * totalScale;  // square
+    const fh = fw;
     const fx = x - fw / 2;
     const fy = y - fh / 2;
     const a = Math.max(0, Math.min(1, alpha));
     const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
 
     if (sheetReady) {
-      // POV thumbnail from sprite sheet, center-cropped to frame aspect
+      // full 1:1 source cell → 1:1 dest frame, no crop needed
       const col = f.spriteIdx % SHEET_COLS;
       const row = (f.spriteIdx / SHEET_COLS) | 0;
-      const cellAR = cellPxW / cellPxH;
-      const frameAR = fw / fh;
-      let sw, sh, sx, sy;
-      if (cellAR > frameAR) {
-        sh = cellPxH; sw = cellPxH * frameAR;
-        sx = col * cellPxW + (cellPxW - sw) / 2;
-        sy = row * cellPxH;
-      } else {
-        sw = cellPxW; sh = cellPxW / frameAR;
-        sx = col * cellPxW;
-        sy = row * cellPxH + (cellPxH - sh) / 2;
-      }
       const prevAlpha = ctx.globalAlpha;
       ctx.globalAlpha = Math.min(1, a * 0.85);
-      ctx.drawImage(sheet, sx, sy, sw, sh, fx, fy, fw, fh);
+      ctx.drawImage(sheet, col * cellPxW, row * cellPxH, cellPxW, cellPxH, fx, fy, fw, fh);
       ctx.globalAlpha = prevAlpha;
     } else {
       ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
@@ -276,7 +264,10 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       const corn = 4 * totalScale;
       ctx.strokeStyle = warm + (a * 1.5) + ')';
       ctx.beginPath();
+      // all four film-frame corners
       ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
+      ctx.moveTo(fx + fw - corn, fy - 1); ctx.lineTo(fx + fw + 1, fy - 1); ctx.lineTo(fx + fw + 1, fy + corn);
+      ctx.moveTo(fx - 1, fy + fh - corn); ctx.lineTo(fx - 1, fy + fh + 1); ctx.lineTo(fx + corn, fy + fh + 1);
       ctx.moveTo(fx + fw + 1, fy + fh - corn); ctx.lineTo(fx + fw + 1, fy + fh + 1); ctx.lineTo(fx + fw - corn, fy + fh + 1);
       ctx.stroke();
     }
@@ -378,7 +369,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         const f = frames[i];
         const w = wellCache[i];
         const x = f.x + w.dx, y = f.y + w.dy;
-        if (x < -BASE_FW * 2 || x > W + BASE_FW * 2 || y < -BASE_FH * 2 || y > H + BASE_FH * 2) continue;
+        if (x < -BASE_FS * 2 || x > W + BASE_FS * 2 || y < -BASE_FS * 2 || y > H + BASE_FS * 2) continue;
         const a = band.alpha * w.alphaM + breathing;
         if (a < 0.004) continue;
         drawFrame(f, w.dx, w.dy, Math.min(1, a), w.scaleM);
