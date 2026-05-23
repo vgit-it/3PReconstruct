@@ -10,12 +10,15 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
    ---------------------------------------------------------- */
 
 /* ============================================================
-   Memory volume — fixed, cursor-driven background (v3)
-   The cursor opens a depth well in the memory field: frames
-   under it sink back, frames at the rim brighten and push
-   outward. Threads between them stretch radially — a glowing
-   ring of "reconstructed angles" emerges around your attention.
-   When the cursor is still, a faint capture-pulse ticks out.
+   Memory volume — fixed, cursor-driven background (v5)
+   Tilted polaroid thumbnails drift gently in a depth field;
+   the cursor opens a well that sinks nearby frames and pushes
+   rim frames outward; threads sag in soft curves with a slow
+   flowing dash; one rim frame is "selected" per moment; a
+   random frame occasionally flickers (memory surfaces) and
+   periodically a chain of connected frames lights up in
+   sequence (associative cascade). Velocity wake drags the
+   field slightly behind fast cursor motion.
    ============================================================ */
 (function initBgCanvas() {
   const canvas = document.getElementById('bg-canvas');
@@ -23,30 +26,45 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const ctx = canvas.getContext('2d', { alpha: true });
   if (!ctx) return;
 
-  // ---- depth bands (visual depth only — no parallax) -------
+  // ---- depth bands (visual depth + per-band tint) ----------
+  // Band 0 = closest (warmest); band 4 = farthest (slightly cooler)
   const BANDS = [
-    { scale: 1.40, alpha: 0.110, stroke: 1.5,  weight: 0.08 },
-    { scale: 1.10, alpha: 0.080, stroke: 1.0,  weight: 0.14 },
-    { scale: 0.85, alpha: 0.055, stroke: 0.75, weight: 0.20 },
-    { scale: 0.60, alpha: 0.035, stroke: 0.5,  weight: 0.26 },
-    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32 },
+    { scale: 1.40, alpha: 0.110, stroke: 1.5,  weight: 0.08, tint: [255, 184, 107], tintA: 0.045 },
+    { scale: 1.10, alpha: 0.080, stroke: 1.0,  weight: 0.14, tint: [235, 178, 130], tintA: 0.030 },
+    { scale: 0.85, alpha: 0.055, stroke: 0.75, weight: 0.20, tint: [200, 180, 170], tintA: 0.025 },
+    { scale: 0.60, alpha: 0.035, stroke: 0.5,  weight: 0.26, tint: [160, 178, 210], tintA: 0.030 },
+    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32, tint: [127, 183, 255], tintA: 0.040 },
   ];
-  const BASE_FS = 88;  // square — matches 1:1 source cells
+  const BASE_FS = 88;
   const DENSITY = 6800;
   const CONN_RADIUS = 210;
   const CONN_RATE = 0.34;
   const WARM = [255, 184, 107];
 
-  // ---- POV thumbnail sheet ---------------------------------
+  // ---- POV thumbnail sheet (color-graded on load) ----------
   const SHEET_COLS = 10, SHEET_ROWS = 10;
   const sheet = new Image();
   let sheetReady = false;
+  let sheetSrc = null;  // either the Image or an offscreen canvas (graded)
   let cellPxW = 0, cellPxH = 0;
   sheet.onload = () => {
     if (!sheet.naturalWidth) return;
-    sheetReady = true;
     cellPxW = sheet.naturalWidth / SHEET_COLS;
     cellPxH = sheet.naturalHeight / SHEET_ROWS;
+    try {
+      const oc = document.createElement('canvas');
+      oc.width = sheet.naturalWidth;
+      oc.height = sheet.naturalHeight;
+      const octx = oc.getContext('2d');
+      if (octx && 'filter' in octx) {
+        octx.filter = 'saturate(0.72) brightness(0.92) contrast(1.05)';
+        octx.drawImage(sheet, 0, 0);
+        sheetSrc = oc;
+      } else {
+        sheetSrc = sheet;
+      }
+    } catch (e) { sheetSrc = sheet; }
+    sheetReady = true;
     if (isStatic) drawOnce();
   };
   sheet.src = 'images/pov-sheet.png';
@@ -61,11 +79,26 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const RIM_PUSH_PX = 12;
 
   // ---- pulse -----------------------------------------------
-  const PULSE_DELAY = 600;      // ms still before pulse fires
-  const PULSE_INTERVAL = 2800;  // ms between pulses while idle
+  const PULSE_DELAY = 600;
+  const PULSE_INTERVAL = 2800;
   const PULSE_DURATION = 1400;
   const PULSE_MAX_R = WELL_RADIUS * 1.6;
   const PULSE_ALPHA = 0.045;
+
+  // ---- v5 motion + events ----------------------------------
+  const ROT_MAX = 0.07;           // base rotation ~±4°, scales up for closer bands
+  const DRIFT_AMP_MAX = 3.5;       // px, foreground; falls off with depth
+  const DRIFT_FREQ_X = 0.0006;
+  const DRIFT_FREQ_Y = 0.00045;
+  const ENTRY_DURATION = 900;
+  const FLICKER_MIN = 4200, FLICKER_MAX = 7800;
+  const FLICKER_DUR = 1100;
+  const CASCADE_MIN = 11000, CASCADE_MAX = 19000;
+  const CASCADE_HOP = 220;
+  const CASCADE_DEPTH = 5;
+  const WAKE_DECAY = 0.90;
+  const EDGE_DASH = [3, 5];
+  const EDGE_DASH_SPEED = 0.020;
 
   function mulberry32(seed) {
     return function () {
@@ -82,14 +115,24 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   let frames = [];
   let bandIndex = [];
   let edges = [];
-  let wellCache = [];      // pre-allocated {dx,dy,scaleM,alphaM} per frame
-  let mx = -1, my = -1;    // normalized 0..1; <0 means cursor outside
+  let edgeIdx = [];        // per-frame: edge indices touching this frame
+  let wellCache = [];
+  let mx = -1, my = -1;
   let smx = 0.5, smy = 0.5;
+  let lastClientX = 0, lastClientY = 0, lastMoveT = 0;
+  let wakeX = 0, wakeY = 0;
   let rafId = 0;
   let mobile = window.innerWidth < 720;
   let isStatic = reduceMotion || mobile;
   let lastMoveTime = 0;
   let pulse = { active: false, r: 0, startTime: 0 };
+  let entryStartTime = 0;
+  let flickers = [];       // [{frameIdx, startTime}]
+  let nextFlickerTime = 0;
+  let cascade = null;      // { edges: [eId,...], frames: [fIdx,...], startTime }
+  let nextCascadeTime = 0;
+  let edgeFlash = new Map();   // eId -> 0..1 (cascade hop fade)
+  let frameFlash = new Map();  // fIdx -> 0..1 (cascade hop fade)
 
   // ---- build (called on init and resize) -------------------
   function buildGrid() {
@@ -101,6 +144,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     frames = [];
     bandIndex = BANDS.map(() => []);
     wellCache = [];
+    edgeIdx = [];
 
     const cum = [];
     let acc = 0;
@@ -116,13 +160,22 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       const spriteIdx = Math.floor(rand() * SHEET_COLS * SHEET_ROWS);
       const jx = (rand() - 0.5) * 2;
       const jy = (rand() - 0.5) * 1.5;
-      frames.push({ x, y, band, iconKind, spriteIdx, jx, jy });
+      // closer bands tilt more (polaroid stack feel)
+      const bandRotMul = 1 + (BANDS.length - 1 - band) * 0.18;
+      const rot = (rand() - 0.5) * 2 * ROT_MAX * bandRotMul;
+      // drift amp falls off with depth
+      const driftAmp = DRIFT_AMP_MAX * (BANDS[band].scale / BANDS[0].scale);
+      const phase = rand() * Math.PI * 2;
+      // distant frames appear first (smaller scale), close frames last
+      const entryDelay =
+        (1 - BANDS[band].scale / BANDS[0].scale) * ENTRY_DURATION * 0.55 +
+        rand() * ENTRY_DURATION * 0.45;
+      frames.push({ x, y, band, iconKind, spriteIdx, jx, jy, rot, driftAmp, phase, entryDelay });
       bandIndex[band].push(i);
       wellCache.push({ dx: jx, dy: jy, scaleM: 1, alphaM: 1 });
+      edgeIdx.push([]);
     }
 
-    // edges: flat list (no per-band buckets needed — endpoints displace
-    // identically since there's no global parallax anymore)
     edges = [];
     const seen = new Set();
     const erand = mulberry32(0xC0FFEE);
@@ -144,10 +197,23 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         if (seen.has(key)) continue;
         if (erand() < CONN_RATE) {
           seen.add(key);
+          const eIdx = edges.length;
           edges.push({ a: i, b: j });
+          edgeIdx[i].push(eIdx);
+          edgeIdx[j].push(eIdx);
         }
       }
     }
+
+    // reset event state
+    flickers.length = 0;
+    edgeFlash.clear();
+    frameFlash.clear();
+    cascade = null;
+    const now = performance.now();
+    nextFlickerTime = now + FLICKER_MIN + Math.random() * (FLICKER_MAX - FLICKER_MIN);
+    nextCascadeTime = now + CASCADE_MIN + Math.random() * (CASCADE_MAX - CASCADE_MIN);
+    entryStartTime = now;
   }
 
   // ---- resize ----------------------------------------------
@@ -174,26 +240,45 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     resizeT = setTimeout(resize, 180);
   });
 
-  // ---- mouse tracking --------------------------------------
+  // ---- mouse tracking + velocity wake ----------------------
   window.addEventListener('mousemove', (e) => {
+    const now = performance.now();
+    if (lastMoveT > 0) {
+      const dt = Math.max(1, now - lastMoveT);
+      const vx = (e.clientX - lastClientX) / dt;   // px/ms
+      const vy = (e.clientY - lastClientY) / dt;
+      // accumulate wake — decays per frame in draw()
+      wakeX += vx * -4;   // negative: field drags behind cursor
+      wakeY += vy * -4;
+      // cap so a flick doesn't fling the whole field
+      const wm = 22;
+      if (wakeX >  wm) wakeX =  wm;
+      if (wakeX < -wm) wakeX = -wm;
+      if (wakeY >  wm) wakeY =  wm;
+      if (wakeY < -wm) wakeY = -wm;
+    }
+    lastClientX = e.clientX; lastClientY = e.clientY;
+    lastMoveT = now;
     mx = e.clientX / W;
     my = e.clientY / H;
-    lastMoveTime = performance.now();
-    // abort a very young pulse so it doesn't smear with cursor motion
+    lastMoveTime = now;
     if (pulse.active && (lastMoveTime - pulse.startTime) < 200) pulse.active = false;
   }, { passive: true });
 
   window.addEventListener('mouseleave', () => { mx = -1; my = -1; });
   window.addEventListener('blur', () => { mx = -1; my = -1; });
 
-  // ---- well profile (fills wellCache in-place) -------------
-  function computeWell() {
+  // ---- well + per-frame drift (fills wellCache in-place) ---
+  function computeWell(time) {
+    const t = time || 0;
+    const driftOn = isStatic ? 0 : 1;
     if (mx < 0 || isStatic) {
-      // no cursor → all neutral
       for (let i = 0; i < frames.length; i++) {
         const f = frames[i];
         const w = wellCache[i];
-        w.dx = f.jx; w.dy = f.jy; w.scaleM = 1; w.alphaM = 1;
+        w.dx = f.jx + Math.sin(t * DRIFT_FREQ_X + f.phase) * f.driftAmp * driftOn;
+        w.dy = f.jy + Math.cos(t * DRIFT_FREQ_Y + f.phase) * f.driftAmp * 0.7 * driftOn;
+        w.scaleM = 1; w.alphaM = 1;
       }
       return;
     }
@@ -204,116 +289,243 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i];
       const w = wellCache[i];
+      const driftX = Math.sin(t * DRIFT_FREQ_X + f.phase) * f.driftAmp;
+      const driftY = Math.cos(t * DRIFT_FREQ_Y + f.phase) * f.driftAmp * 0.7;
       const ddx = f.x - cx, ddy = f.y - cy;
       const dist = Math.sqrt(ddx * ddx + ddy * ddy);
       const r = dist * invR;
       if (r >= 1.0) {
-        w.dx = f.jx; w.dy = f.jy; w.scaleM = 1; w.alphaM = 1;
+        w.dx = f.jx + driftX; w.dy = f.jy + driftY;
+        w.scaleM = 1; w.alphaM = 1;
         continue;
       }
       if (r < INNER_FRAC) {
-        const t = r * invInner;
-        w.scaleM = SINK_SCALE + (1 - SINK_SCALE) * t;
-        w.alphaM = SINK_ALPHA + (1 - SINK_ALPHA) * t;
-        w.dx = f.jx;
-        w.dy = f.jy;
+        const tt = r * invInner;
+        w.scaleM = SINK_SCALE + (1 - SINK_SCALE) * tt;
+        w.alphaM = SINK_ALPHA + (1 - SINK_ALPHA) * tt;
+        // dampen drift inside the well
+        w.dx = f.jx + driftX * tt;
+        w.dy = f.jy + driftY * tt;
       } else {
-        const t = (r - INNER_FRAC) * invRim;
-        const rim = Math.sin(t * Math.PI);
+        const tt = (r - INNER_FRAC) * invRim;
+        const rim = Math.sin(tt * Math.PI);
         w.scaleM = 1 + rim * RIM_SCALE_BOOST;
         w.alphaM = 1 + rim * RIM_ALPHA_BOOST;
         const push = rim * RIM_PUSH_PX;
         const inv = dist > 0.0001 ? 1 / dist : 0;
-        w.dx = f.jx + ddx * inv * push;
-        w.dy = f.jy + ddy * inv * push;
+        w.dx = f.jx + driftX + ddx * inv * push;
+        w.dy = f.jy + driftY + ddy * inv * push;
+      }
+    }
+  }
+
+  // ---- helpers ---------------------------------------------
+  function pathRoundRect(x, y, w, h, r) {
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function flickerFor(idx, time) {
+    for (let k = 0; k < flickers.length; k++) {
+      if (flickers[k].frameIdx === idx) {
+        const p = (time - flickers[k].startTime) / FLICKER_DUR;
+        if (p < 0 || p >= 1) continue;
+        const bell = p < 0.3 ? (p / 0.3) : (1 - (p - 0.3) / 0.7);
+        return { boost: 1 + bell * 1.8, glow: bell };
+      }
+    }
+    const cf = frameFlash.get(idx);
+    if (cf && cf > 0) return { boost: 1 + cf * 1.4, glow: cf * 0.85 };
+    return null;
+  }
+
+  function tickEvents(time) {
+    // prune expired flickers
+    for (let k = flickers.length - 1; k >= 0; k--) {
+      if (time - flickers[k].startTime > FLICKER_DUR) flickers.splice(k, 1);
+    }
+    // spawn new flicker
+    if (frames.length && time > nextFlickerTime && flickers.length < 2) {
+      flickers.push({ frameIdx: Math.floor(Math.random() * frames.length), startTime: time });
+      nextFlickerTime = time + FLICKER_MIN + Math.random() * (FLICKER_MAX - FLICKER_MIN);
+    }
+    // schedule new cascade
+    if (!cascade && frames.length && time > nextCascadeTime) {
+      const seed = Math.floor(Math.random() * frames.length);
+      if (edgeIdx[seed] && edgeIdx[seed].length > 0) {
+        const seen = new Set([seed]);
+        const order = [seed];
+        const depthOf = new Map([[seed, 0]]);
+        const queue = [seed];
+        while (queue.length && order.length < 10) {
+          const cur = queue.shift();
+          const d = depthOf.get(cur);
+          if (d >= CASCADE_DEPTH) continue;
+          for (const eId of edgeIdx[cur]) {
+            const e = edges[eId];
+            const other = e.a === cur ? e.b : e.a;
+            if (!seen.has(other)) {
+              seen.add(other);
+              depthOf.set(other, d + 1);
+              order.push(other);
+              queue.push(other);
+            }
+          }
+        }
+        const chainEdges = [];
+        for (let i = 1; i < order.length; i++) {
+          const prev = order[i - 1], cur = order[i];
+          for (const eId of edgeIdx[cur]) {
+            const e = edges[eId];
+            if ((e.a === prev && e.b === cur) || (e.b === prev && e.a === cur)) {
+              chainEdges.push(eId);
+              break;
+            }
+          }
+        }
+        if (chainEdges.length > 0) {
+          cascade = { edges: chainEdges, frames: order, startTime: time };
+        }
+      }
+      nextCascadeTime = time + CASCADE_MIN + Math.random() * (CASCADE_MAX - CASCADE_MIN);
+    }
+    // step cascade — recompute flashes each tick
+    edgeFlash.clear();
+    frameFlash.clear();
+    if (cascade) {
+      const elapsed = time - cascade.startTime;
+      const totalDur = cascade.edges.length * CASCADE_HOP + 700;
+      if (elapsed > totalDur) {
+        cascade = null;
+      } else {
+        for (let i = 0; i < cascade.edges.length; i++) {
+          const startAt = i * CASCADE_HOP;
+          const localT = elapsed - startAt;
+          if (localT >= 0 && localT < 600) edgeFlash.set(cascade.edges[i], 1 - localT / 600);
+        }
+        for (let i = 0; i < cascade.frames.length; i++) {
+          const startAt = i === 0 ? 0 : (i - 1) * CASCADE_HOP + 100;
+          const localT = elapsed - startAt;
+          if (localT >= 0 && localT < 700) frameFlash.set(cascade.frames[i], 1 - localT / 700);
+        }
       }
     }
   }
 
   // ---- frame drawing ----------------------------------------
-  function drawFrame(f, dx, dy, alpha, scaleOverride) {
+  function drawFrame(f, idx, time, dx, dy, alpha, scaleOverride, isWinner) {
     const band = BANDS[f.band];
     const totalScale = band.scale * scaleOverride;
     const x = f.x + dx;
     const y = f.y + dy;
-    const fw = BASE_FS * totalScale;  // square
+    const fw = BASE_FS * totalScale;
     const fh = fw;
-    const fx = x - fw / 2;
-    const fy = y - fh / 2;
+    const hw = fw / 2, hh = fh / 2;
     const a = Math.max(0, Math.min(1, alpha));
     const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
+    const cornerR = Math.max(1, 3 * totalScale);
 
-    if (sheetReady) {
-      // full 1:1 source cell → 1:1 dest frame, no crop needed
-      const col = f.spriteIdx % SHEET_COLS;
-      const row = (f.spriteIdx / SHEET_COLS) | 0;
-      const prevAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = Math.min(1, a * 0.85);
-      ctx.drawImage(sheet, col * cellPxW, row * cellPxH, cellPxW, cellPxH, fx, fy, fw, fh);
-      ctx.globalAlpha = prevAlpha;
-    } else {
-      ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
-      ctx.fillRect(fx, fy, fw, fh);
-    }
+    // event modulation
+    const flk = flickerFor(idx, time);
+    const flkBoost = flk ? flk.boost : 1;
+    const flkGlow = flk ? flk.glow : 0;
+    const effA = Math.min(1, a * flkBoost);
 
-    ctx.strokeStyle = warm + (a * 0.9) + ')';
-    ctx.lineWidth = band.stroke;
-    ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
+    ctx.save();
+    ctx.translate(x, y);
+    if (f.rot) ctx.rotate(f.rot);
 
-    if (totalScale > 0.55) {
-      const corn = 4 * totalScale;
-      ctx.strokeStyle = warm + (a * 1.5) + ')';
-      ctx.beginPath();
-      // all four film-frame corners
-      ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
-      ctx.moveTo(fx + fw - corn, fy - 1); ctx.lineTo(fx + fw + 1, fy - 1); ctx.lineTo(fx + fw + 1, fy + corn);
-      ctx.moveTo(fx - 1, fy + fh - corn); ctx.lineTo(fx - 1, fy + fh + 1); ctx.lineTo(fx + corn, fy + fh + 1);
-      ctx.moveTo(fx + fw + 1, fy + fh - corn); ctx.lineTo(fx + fw + 1, fy + fh + 1); ctx.lineTo(fx + fw - corn, fy + fh + 1);
+    // outer glow (flicker or winner) — drawn under the thumbnail
+    if (flkGlow > 0.04 || isWinner) {
+      const glowA = Math.max(flkGlow * 0.22, isWinner ? 0.18 : 0);
+      ctx.strokeStyle = warm + glowA + ')';
+      ctx.lineWidth = 8 * totalScale;
+      pathRoundRect(-hw - 2, -hh - 2, fw + 4, fh + 4, cornerR + 3);
       ctx.stroke();
     }
 
+    // thumbnail (clipped to rounded rect), with drop shadow for closer bands
+    if (sheetReady && sheetSrc) {
+      const col = f.spriteIdx % SHEET_COLS;
+      const row = (f.spriteIdx / SHEET_COLS) | 0;
+      ctx.save();
+      if (totalScale > 0.85) {
+        ctx.shadowColor = 'rgba(0,0,0,0.45)';
+        ctx.shadowBlur = 9 * totalScale;
+        ctx.shadowOffsetY = 3 * totalScale;
+      }
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = Math.min(1, effA * 0.9);
+      pathRoundRect(-hw, -hh, fw, fh, cornerR);
+      ctx.clip();
+      ctx.drawImage(sheetSrc, col * cellPxW, row * cellPxH, cellPxW, cellPxH, -hw, -hh, fw, fh);
+      // per-band tint multiply
+      if (band.tintA > 0) {
+        ctx.fillStyle = `rgba(${band.tint[0]},${band.tint[1]},${band.tint[2]},${band.tintA})`;
+        ctx.fillRect(-hw, -hh, fw, fh);
+      }
+      ctx.globalAlpha = prevAlpha;
+      ctx.restore();  // drops the shadow + clip together
+    } else if (!sheetReady) {
+      ctx.fillStyle = `rgba(255,255,255,${effA * 0.04})`;
+      pathRoundRect(-hw, -hh, fw, fh, cornerR);
+      ctx.fill();
+    }
+
+    // border
+    ctx.strokeStyle = warm + (effA * (isWinner ? 1.8 : 0.9)) + ')';
+    ctx.lineWidth = band.stroke * (isWinner ? 1.6 : 1);
+    pathRoundRect(-hw + 0.5, -hh + 0.5, fw - 1, fh - 1, cornerR);
+    ctx.stroke();
+
+    // 4 L-corner accents (local coords)
+    if (totalScale > 0.55) {
+      const corn = 4 * totalScale;
+      ctx.strokeStyle = warm + (effA * 1.5) + ')';
+      ctx.beginPath();
+      ctx.moveTo(-hw - 1, -hh + corn); ctx.lineTo(-hw - 1, -hh - 1); ctx.lineTo(-hw + corn, -hh - 1);
+      ctx.moveTo(hw - corn, -hh - 1);  ctx.lineTo(hw + 1, -hh - 1);  ctx.lineTo(hw + 1, -hh + corn);
+      ctx.moveTo(-hw - 1, hh - corn);  ctx.lineTo(-hw - 1, hh + 1);  ctx.lineTo(-hw + corn, hh + 1);
+      ctx.moveTo(hw + 1, hh - corn);   ctx.lineTo(hw + 1, hh + 1);   ctx.lineTo(hw - corn, hh + 1);
+      ctx.stroke();
+    }
+
+    // fallback icon while sheet loads
     if (!sheetReady && totalScale > 0.5) {
-      // fallback icons while the sheet loads
-      const ix = x, iy = y;
       const r = Math.min(fw, fh) * 0.18;
-      ctx.strokeStyle = warm + (a * 1.15) + ')';
-      ctx.fillStyle = warm + (a * 1.15) + ')';
+      ctx.strokeStyle = warm + (effA * 1.15) + ')';
+      ctx.fillStyle = warm + (effA * 1.15) + ')';
       ctx.lineWidth = band.stroke;
       switch (f.iconKind) {
         case 0:
-          ctx.beginPath(); ctx.arc(ix, iy, r, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.arc(ix, iy, r * 0.45, 0, Math.PI * 2); ctx.stroke();
-          break;
+          ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2); ctx.stroke(); break;
         case 1:
-          ctx.beginPath();
-          ctx.moveTo(ix - r * 0.7, iy - r);
-          ctx.lineTo(ix + r, iy);
-          ctx.lineTo(ix - r * 0.7, iy + r);
-          ctx.closePath();
-          ctx.fill();
-          break;
+          ctx.beginPath(); ctx.moveTo(-r * 0.7, -r); ctx.lineTo(r, 0); ctx.lineTo(-r * 0.7, r); ctx.closePath(); ctx.fill(); break;
         case 2:
           ctx.beginPath();
           for (let k = 0; k < 6; k++) {
             const ang = (Math.PI / 3) * k - Math.PI / 6;
-            const px = ix + Math.cos(ang) * r;
-            const py = iy + Math.sin(ang) * r;
+            const px = Math.cos(ang) * r, py = Math.sin(ang) * r;
             if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           }
-          ctx.closePath();
-          ctx.stroke();
-          break;
+          ctx.closePath(); ctx.stroke(); break;
         case 3:
-          ctx.beginPath(); ctx.arc(ix - r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.arc(ix + r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(ix - r * 0.18, iy); ctx.lineTo(ix + r * 0.18, iy); ctx.stroke();
-          break;
+          ctx.beginPath(); ctx.arc(-r * 0.6, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc( r * 0.6, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-r * 0.18, 0); ctx.lineTo(r * 0.18, 0); ctx.stroke(); break;
         case 4: {
           const off = r * 0.45;
           for (let dxk = -1; dxk <= 1; dxk += 2) {
             for (let dyk = -1; dyk <= 1; dyk += 2) {
               ctx.beginPath();
-              ctx.arc(ix + dxk * off, iy + dyk * off, 1.2 * totalScale, 0, Math.PI * 2);
+              ctx.arc(dxk * off, dyk * off, 1.2 * totalScale, 0, Math.PI * 2);
               ctx.fill();
             }
           }
@@ -322,43 +534,87 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       }
     }
 
-    ctx.fillStyle = warm + (a * 1.3) + ')';
+    // center dot
+    ctx.fillStyle = warm + (effA * 1.3) + ')';
     ctx.beginPath();
-    ctx.arc(x, y, Math.max(0.7, 1.5 * totalScale), 0, Math.PI * 2);
+    ctx.arc(0, 0, Math.max(0.7, 1.5 * totalScale), 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.restore();
   }
 
   // ---- draw loop -------------------------------------------
   function draw(time) {
-    // smooth cursor (only used when mx >= 0)
+    const t = time || performance.now();
     if (mx >= 0) {
       smx += (mx - smx) * 0.10;
       smy += (my - smy) * 0.10;
     }
+    // wake decay
+    wakeX *= WAKE_DECAY;
+    wakeY *= WAKE_DECAY;
+    if (Math.abs(wakeX) < 0.04) wakeX = 0;
+    if (Math.abs(wakeY) < 0.04) wakeY = 0;
 
     ctx.clearRect(0, 0, W, H);
 
-    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.035;
+    const breathing = isStatic ? 0 : Math.sin(t * 0.0004) * 0.035;
 
-    computeWell();
+    if (!isStatic) tickEvents(t);
 
-    // edges first — the spoke effect emerges naturally from per-endpoint
-    // displacement (sunk frames pull threads short; rim frames stretch them out)
+    computeWell(t);
+
+    // find rim "winner" (frame at peak of rim band)
+    let winnerIdx = -1, winnerScore = 0;
+    if (mx >= 0 && !isStatic) {
+      const cx = smx * W, cy = smy * H;
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        const ddx = f.x - cx, ddy = f.y - cy;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+        const r = dist / WELL_RADIUS;
+        if (r >= INNER_FRAC && r < 1.0) {
+          const tt = (r - INNER_FRAC) / (1 - INNER_FRAC);
+          const rim = Math.sin(tt * Math.PI);
+          if (rim > winnerScore) { winnerScore = rim; winnerIdx = i; }
+        }
+      }
+    }
+
+    // entry stagger
+    const entryT = t - entryStartTime;
+    const inEntry = entryT < ENTRY_DURATION + 700;
+
+    // edges — soft curve + flowing dash
+    if (!isStatic) {
+      ctx.setLineDash(EDGE_DASH);
+      ctx.lineDashOffset = -(t * EDGE_DASH_SPEED);
+    }
     for (let e = 0; e < edges.length; e++) {
       const edge = edges[e];
       const A = frames[edge.a], B = frames[edge.b];
       const wA = wellCache[edge.a], wB = wellCache[edge.b];
       const bA = BANDS[A.band], bB = BANDS[B.band];
       const baseLineA = Math.min(bA.alpha, bB.alpha) * 0.5;
-      const lineA = baseLineA * Math.min(wA.alphaM, wB.alphaM) + breathing * 0.25;
+      let lineA = baseLineA * Math.min(wA.alphaM, wB.alphaM) + breathing * 0.25;
+      const flashAmt = edgeFlash.get(e) || 0;
+      if (flashAmt > 0) lineA += flashAmt * 0.20;
       if (lineA < 0.004) continue;
+      const ax = A.x + wA.dx + wakeX * 0.35, ay = A.y + wA.dy + wakeY * 0.35;
+      const bx = B.x + wB.dx + wakeX * 0.35, by = B.y + wB.dy + wakeY * 0.35;
+      const ex = bx - ax, ey = by - ay;
+      const elen = Math.sqrt(ex * ex + ey * ey) || 1;
+      const sag = elen * 0.08;
+      const mxp = (ax + bx) / 2 + (-ey / elen) * sag;
+      const myp = (ay + by) / 2 + ( ex / elen) * sag;
       ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${Math.max(0, lineA)})`;
-      ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7;
+      ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7 + flashAmt * 0.5;
       ctx.beginPath();
-      ctx.moveTo(A.x + wA.dx, A.y + wA.dy);
-      ctx.lineTo(B.x + wB.dx, B.y + wB.dy);
+      ctx.moveTo(ax, ay);
+      ctx.quadraticCurveTo(mxp, myp, bx, by);
       ctx.stroke();
     }
+    if (!isStatic) ctx.setLineDash([]);
 
     // frames back-to-front
     for (let bIdx = BANDS.length - 1; bIdx >= 0; bIdx--) {
@@ -368,20 +624,25 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         const i = list[k];
         const f = frames[i];
         const w = wellCache[i];
-        const x = f.x + w.dx, y = f.y + w.dy;
-        if (x < -BASE_FS * 2 || x > W + BASE_FS * 2 || y < -BASE_FS * 2 || y > H + BASE_FS * 2) continue;
-        const a = band.alpha * w.alphaM + breathing;
+        const fx = f.x + w.dx + wakeX, fy = f.y + w.dy + wakeY;
+        if (fx < -BASE_FS * 2 || fx > W + BASE_FS * 2 || fy < -BASE_FS * 2 || fy > H + BASE_FS * 2) continue;
+        let entryMul = 1;
+        if (inEntry) {
+          const after = entryT - f.entryDelay;
+          if (after < 0) continue;
+          entryMul = Math.min(1, after / 420);
+        }
+        const a = (band.alpha * w.alphaM + breathing) * entryMul;
         if (a < 0.004) continue;
-        drawFrame(f, w.dx, w.dy, Math.min(1, a), w.scaleM);
+        drawFrame(f, i, t, w.dx + wakeX, w.dy + wakeY, Math.min(1, a), w.scaleM, i === winnerIdx);
       }
     }
 
     // idle capture pulse
     if (!isStatic && mx >= 0) {
-      const now = time || 0;
+      const now = t;
       const elapsed = now - lastMoveTime;
       if (!pulse.active && elapsed > PULSE_DELAY) {
-        // fire a pulse, then again every PULSE_INTERVAL while idle
         const since = elapsed - PULSE_DELAY;
         const phase = since % PULSE_INTERVAL;
         if (phase < PULSE_DURATION) {
@@ -409,9 +670,10 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   }
 
   function drawOnce() {
-    // static render: neutralise the well
     mx = -1; my = -1;
+    wakeX = 0; wakeY = 0;
     cancelAnimationFrame(rafId);
+    entryStartTime = -1e6;  // skip entry fade for static render
     draw(0);
   }
 

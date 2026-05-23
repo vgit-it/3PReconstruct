@@ -64,7 +64,50 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   pointer-events: none;
   display: block;
 }
-main, .foot { position: relative; z-index: 1; }
+
+/* viewport vignette — keeps focus on the center column */
+.bg-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 50%,
+      transparent 0%,
+      transparent 45%,
+      rgba(8,8,10,0.40) 80%,
+      rgba(8,8,10,0.70) 100%);
+}
+
+main, .foot { position: relative; z-index: 2; }
+
+/* content-area dimming behind text-heavy sections:
+   a soft radial gradient centered in each section dims the bg
+   directly behind paragraphs without flat-blacking the corners */
+.triggers,
+.novelty,
+.privacy,
+.confidence,
+.angles-sec,
+.closing {
+  position: relative;
+}
+.triggers::before,
+.novelty::before,
+.privacy::before,
+.confidence::before,
+.angles-sec::before,
+.closing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(ellipse 55% 60% at 50% 50%,
+    rgba(8,8,10,0.55) 0%,
+    rgba(8,8,10,0.30) 50%,
+    transparent 90%);
+}
 
 /* ------------------------------------------------------------
    Film-grain overlay
