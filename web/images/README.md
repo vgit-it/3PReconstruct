@@ -10,19 +10,19 @@ A consistent style across all images is critical. A single style note to prepend
 
 ---
 
-## 1. `missing-photographer.jpg` — Section 2 (The gap)
+## 1. `missing-photographer.png` — Section 2 (The gap)
 
 > A cinematic wide shot of four close friends laughing around a small wooden table outdoors at golden hour, warm string lights overhead, shallow depth of field, shot on 35mm film aesthetic, deep blacks, warm highlights. One seat at the table is empty — a faint translucent silhouette of a person occupying that seat, barely visible like a ghost, suggesting an absent photographer. Mood: warm, intimate, slightly melancholic. Aspect 16:9.
 
-## 2. `pov-frame.jpg` — Section 3 (The promise, first layer)
+## 2. `pov-frame.png` — Section 3 (The promise, first layer)
 
 > First-person POV photograph from someone seated at the same outdoor dinner table from Image #1. The viewer sees the friends across the table, a glass of wine in the lower foreground slightly blurred, hands resting on the table edge faintly visible at the bottom of the frame. Warm string lights, golden hour, 35mm film look, cinematic dark shadows. Aspect 16:9.
 
-## 3. `third-person-reconstruction.jpg` — Section 3 (The promise, reveal layer)
+## 3. `third-person-reconstruction.png` — Section 3 (The promise, reveal layer)
 
 > Same scene and same people as Image #2 but shot from a different angle — a medium-wide third-person view from across the patio, showing all four friends including the wearer (a person in elegant minimalist smart glasses) at the table, laughing. Same warm string lights, golden hour, 35mm film aesthetic, deep blacks, cinematic. The wearer is clearly visible in frame. Aspect 16:9.
 
-## 4. `reconstruction-scene.jpg` — Section 8 (Confidence base)
+## 4. `reconstruction-scene.png` — Section 8 (Confidence base)
 
 > A cinematic wide reconstruction of a person walking through a misty forest trail at dawn, soft volumetric light through trees, photorealistic, dramatic mood. Aspect 16:9.
 
@@ -30,15 +30,15 @@ A consistent style across all images is critical. A single style note to prepend
 
 > A depth/confidence map of the forest trail scene from Image #4: smooth gradient from green (foreground, known geometry) through yellow (mid-ground) to red (distant, uncertain). Stylized, semi-transparent overlay. Same composition and framing as Image #4. Aspect 16:9. **Export as PNG with transparency where confidence is highest** so it blends into the base image when revealed by the cursor torch.
 
-## 6. `angle-variant-a.jpg` — Section 9, the **winning** angle
+## 6. `angle-variant-a.png` — Section 9, the **winning** angle
 
 > A person in elegant smart glasses reading at a sunlit window in a minimalist apartment. Low front angle — camera close to the floor, looking slightly up. 35mm film aesthetic, warm interior light, cinematic, deep shadows. Aspect 16:9.
 
-## 7. `angle-variant-b.jpg` — Section 9, candidate
+## 7. `angle-variant-b.png` — Section 9, candidate
 
 > Same person, same room, same moment as #6. High-corner angle — camera up near the ceiling in a far corner of the room, looking down at the person reading by the window. 35mm film aesthetic, warm interior light, cinematic. Aspect 16:9.
 
-## 8. `angle-variant-c.jpg` — Section 9, candidate
+## 8. `angle-variant-c.png` — Section 9, candidate
 
 > Same person, same room, same moment as #6. Medium shot from across the room at eye level. 35mm film aesthetic, warm interior light, cinematic. Aspect 16:9.
 
