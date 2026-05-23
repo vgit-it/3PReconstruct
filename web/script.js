@@ -29,11 +29,11 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   // ---- depth bands (visual depth + per-band tint) ----------
   // Band 0 = closest (warmest); band 4 = farthest (slightly cooler)
   const BANDS = [
-    { scale: 1.40, alpha: 0.110, stroke: 1.5,  weight: 0.08, tint: [255, 184, 107], tintA: 0.045 },
-    { scale: 1.10, alpha: 0.080, stroke: 1.0,  weight: 0.14, tint: [235, 178, 130], tintA: 0.030 },
-    { scale: 0.85, alpha: 0.055, stroke: 0.75, weight: 0.20, tint: [200, 180, 170], tintA: 0.025 },
-    { scale: 0.60, alpha: 0.035, stroke: 0.5,  weight: 0.26, tint: [160, 178, 210], tintA: 0.030 },
-    { scale: 0.40, alpha: 0.020, stroke: 0.4,  weight: 0.32, tint: [127, 183, 255], tintA: 0.040 },
+    { scale: 1.40, alpha: 0.175, stroke: 1.5,  weight: 0.08, tint: [255, 184, 107], tintA: 0.045 },
+    { scale: 1.10, alpha: 0.125, stroke: 1.0,  weight: 0.14, tint: [235, 178, 130], tintA: 0.030 },
+    { scale: 0.85, alpha: 0.085, stroke: 0.75, weight: 0.20, tint: [200, 180, 170], tintA: 0.025 },
+    { scale: 0.60, alpha: 0.055, stroke: 0.5,  weight: 0.26, tint: [160, 178, 210], tintA: 0.030 },
+    { scale: 0.40, alpha: 0.032, stroke: 0.4,  weight: 0.32, tint: [127, 183, 255], tintA: 0.040 },
   ];
   const BASE_FS = 88;
   const DENSITY = 6800;
@@ -87,11 +87,11 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
   // ---- v5 motion + events ----------------------------------
   const ROT_MAX = 0.07;           // base rotation ~±4°, scales up for closer bands
-  const DRIFT_AMP_MAX = 3.5;       // px, foreground; falls off with depth
+  const DRIFT_AMP_MAX = 1.0;       // px, foreground; falls off with depth
   const DRIFT_FREQ_X = 0.0006;
   const DRIFT_FREQ_Y = 0.00045;
   const ENTRY_DURATION = 900;
-  const FLICKER_MIN = 4200, FLICKER_MAX = 7800;
+  const FLICKER_MIN = 10000, FLICKER_MAX = 20000;
   const FLICKER_DUR = 1100;
   const CASCADE_MIN = 11000, CASCADE_MAX = 19000;
   const CASCADE_HOP = 220;
@@ -248,10 +248,10 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
       const vx = (e.clientX - lastClientX) / dt;   // px/ms
       const vy = (e.clientY - lastClientY) / dt;
       // accumulate wake — decays per frame in draw()
-      wakeX += vx * -4;   // negative: field drags behind cursor
-      wakeY += vy * -4;
+      wakeX += vx * -1.5;   // negative: field drags behind cursor
+      wakeY += vy * -1.5;
       // cap so a flick doesn't fling the whole field
-      const wm = 22;
+      const wm = 8;
       if (wakeX >  wm) wakeX =  wm;
       if (wakeX < -wm) wakeX = -wm;
       if (wakeY >  wm) wakeY =  wm;
@@ -337,7 +337,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         const p = (time - flickers[k].startTime) / FLICKER_DUR;
         if (p < 0 || p >= 1) continue;
         const bell = p < 0.3 ? (p / 0.3) : (1 - (p - 0.3) / 0.7);
-        return { boost: 1 + bell * 1.8, glow: bell };
+        return { boost: 1 + bell * 1.1, glow: bell * 0.7 };
       }
     }
     const cf = frameFlash.get(idx);
@@ -461,7 +461,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         ctx.shadowOffsetY = 3 * totalScale;
       }
       const prevAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = Math.min(1, effA * 0.9);
+      ctx.globalAlpha = Math.min(1, effA * 1.0);
       pathRoundRect(-hw, -hh, fw, fh, cornerR);
       ctx.clip();
       ctx.drawImage(sheetSrc, col * cellPxW, row * cellPxH, cellPxW, cellPxH, -hw, -hh, fw, fh);
