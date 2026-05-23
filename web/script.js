@@ -10,10 +10,11 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
    ---------------------------------------------------------- */
 
 /* ============================================================
-   Memory constellation — fixed, mouse-reactive background
-   A sparse grid of tiny "memory frame" icons connected by
-   faint amber threads. Nearby cells brighten and drift toward
-   the cursor. Subtle by design — felt, not stared at.
+   Memory volume — fixed, mouse-reactive 3D background (v2)
+   Frames live in 5 depth bands. Near frames are larger, brighter,
+   and swing strongly with the cursor; far frames are tiny, dim,
+   and barely move. The differential parallax across bands is
+   what reads as 3D depth.
    ============================================================ */
 (function initBgCanvas() {
   const canvas = document.getElementById('bg-canvas');
@@ -21,19 +22,21 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const ctx = canvas.getContext('2d', { alpha: true });
   if (!ctx) return;
 
-  // ---- config ----------------------------------------------
-  const CELL_W = 150;          // grid cell size (px)
-  const CELL_H = 105;
-  const FRAME_PAD = 22;        // padding inside cell for the frame
-  const ACTIVE_RATE = 0.45;    // fraction of cells with a frame
-  const CONNECT_RATE = 0.42;   // fraction of adjacent active-pairs to connect
-  const PARALLAX_X = 14;       // max px drift on X at depth=1
-  const PARALLAX_Y = 10;
-  const PROX_RADIUS = 220;     // mouse proximity falloff (px)
-  const PROX_BOOST = 0.55;     // max alpha multiplier added near cursor
-  const BASE_ALPHA = 0.085;    // frames are very faint at rest
-  const LINE_ALPHA = 0.045;
-  const NODE_ALPHA = 0.11;
+  // ---- depth bands (0 = foreground, 4 = distant) -----------
+  const BANDS = [
+    { scale: 1.40, alpha: 0.18, stroke: 1.5,  pxX: 60, pxY: 38, weight: 0.08, proxMul: 1.00 },
+    { scale: 1.10, alpha: 0.13, stroke: 1.0,  pxX: 40, pxY: 26, weight: 0.14, proxMul: 0.85 },
+    { scale: 0.85, alpha: 0.09, stroke: 0.75, pxX: 25, pxY: 16, weight: 0.20, proxMul: 0.65 },
+    { scale: 0.60, alpha: 0.06, stroke: 0.5,  pxX: 12, pxY: 8,  weight: 0.26, proxMul: 0.45 },
+    { scale: 0.40, alpha: 0.04, stroke: 0.4,  pxX:  4, pxY: 3,  weight: 0.32, proxMul: 0.25 },
+  ];
+  const BASE_FW = 110;          // nominal frame width at scale 1
+  const BASE_FH = 70;
+  const DENSITY = 6800;         // px² per frame
+  const PROX_RADIUS = 240;
+  const PROX_BOOST = 0.20;      // max additive alpha near cursor (scaled by band)
+  const CONN_RADIUS = 210;
+  const CONN_RATE = 0.34;
   const WARM = [255, 184, 107];
 
   // simple seeded PRNG so the constellation is stable across redraws
@@ -49,63 +52,69 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   // ---- state -----------------------------------------------
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W = 0, H = 0;
-  let cols = 0, rows = 0;
-  let cells = [];           // [{cx,cy,active,depth,iconType,seed}]
-  let edges = [];           // [{a,b}] indices into cells
-  let mx = 0.5, my = 0.5;   // target normalized mouse
-  let smx = 0.5, smy = 0.5; // smoothed
+  let frames = [];              // [{x,y,band,iconKind,jx,jy}]
+  let bandIndex = [];           // [[idx,...], ...] frames grouped by band
+  let edgesByBand = [];         // [[{a,b},...], ...] edges, keyed by nearer endpoint's band
+  let mx = 0.5, my = 0.5;
+  let smx = 0.5, smy = 0.5;
   let rafId = 0;
   let mobile = window.innerWidth < 720;
   let isStatic = reduceMotion || mobile;
 
-  // ---- build grid (called on init and resize) --------------
+  // ---- build (called on init and resize) -------------------
   function buildGrid() {
-    cols = Math.ceil(W / CELL_W) + 2;  // bleed by 1 cell each side
-    rows = Math.ceil(H / CELL_H) + 2;
-    const originX = -CELL_W;
-    const originY = -CELL_H;
-    const rand = mulberry32(1337);
-    cells = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const jitterX = (rand() - 0.5) * 14;
-        const jitterY = (rand() - 0.5) * 10;
-        const active = rand() < ACTIVE_RATE;
-        cells.push({
-          col: c, row: r,
-          cx: originX + c * CELL_W + CELL_W / 2 + jitterX,
-          cy: originY + r * CELL_H + CELL_H / 2 + jitterY,
-          active: active,
-          depth: 0.25 + rand() * 0.75,
-          iconType: Math.floor(rand() * 5),   // 0..4
-          // small per-cell phase for ambient breathing
-          phase: rand() * Math.PI * 2,
-          // per-cell scale tweak so frames aren't all identical size
-          scale: 0.85 + rand() * 0.4,
-        });
-      }
+    const bleed = 100;
+    const area = (W + bleed * 2) * (H + bleed * 2);
+    const targetCount = Math.max(80, Math.floor(area / DENSITY));
+    const rand = mulberry32(0x3F00);
+
+    frames = [];
+    bandIndex = BANDS.map(() => []);
+    edgesByBand = BANDS.map(() => []);
+
+    // cumulative weights for band sampling
+    const cum = [];
+    let acc = 0;
+    for (const b of BANDS) { acc += b.weight; cum.push(acc); }
+
+    for (let i = 0; i < targetCount; i++) {
+      const r = rand();
+      let band = 0;
+      while (band < cum.length - 1 && r > cum[band]) band++;
+      const x = -bleed + rand() * (W + bleed * 2);
+      const y = -bleed + rand() * (H + bleed * 2);
+      const iconKind = Math.floor(rand() * 5);
+      const jx = (rand() - 0.5) * 2;
+      const jy = (rand() - 0.5) * 1.5;
+      frames.push({ x, y, band, iconKind, jx, jy });
+      bandIndex[band].push(i);
     }
-    // build edges between adjacent active cells (right & down only, avoid dupes)
-    edges = [];
-    const rand2 = mulberry32(4242);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const i = r * cols + c;
-        if (!cells[i].active) continue;
-        // right neighbor
-        if (c + 1 < cols) {
-          const j = r * cols + (c + 1);
-          if (cells[j].active && rand2() < CONNECT_RATE) edges.push({ a: i, b: j });
-        }
-        // down neighbor
-        if (r + 1 < rows) {
-          const j = (r + 1) * cols + c;
-          if (cells[j].active && rand2() < CONNECT_RATE) edges.push({ a: i, b: j });
-        }
-        // occasional diagonal for variety
-        if (c + 1 < cols && r + 1 < rows) {
-          const j = (r + 1) * cols + (c + 1);
-          if (cells[j].active && rand2() < CONNECT_RATE * 0.5) edges.push({ a: i, b: j });
+
+    // edges: for each frame, link up to 2 nearest others within CONN_RADIUS
+    // with probability CONN_RATE. Bucket by the nearer endpoint's band so
+    // we can render back-to-front with edges interleaved correctly.
+    const seen = new Set();
+    const erand = mulberry32(0xC0FFEE);
+    for (let i = 0; i < frames.length; i++) {
+      const a = frames[i];
+      const cand = [];
+      for (let j = 0; j < frames.length; j++) {
+        if (j === i) continue;
+        const b = frames[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < CONN_RADIUS * CONN_RADIUS) cand.push([d2, j]);
+      }
+      cand.sort((p, q) => p[0] - q[0]);
+      const take = Math.min(2, cand.length);
+      for (let k = 0; k < take; k++) {
+        const j = cand[k][1];
+        const key = i < j ? (i * 100000 + j) : (j * 100000 + i);
+        if (seen.has(key)) continue;
+        if (erand() < CONN_RATE) {
+          seen.add(key);
+          const nearerBand = Math.min(frames[i].band, frames[j].band);
+          edgesByBand[nearerBand].push({ a: i, b: j });
         }
       }
     }
@@ -139,143 +148,157 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     my = e.clientY / H;
   }, { passive: true });
 
+  // ---- per-frame alpha including proximity boost -----------
+  function alphaForFrame(f, dx, dy) {
+    const band = BANDS[f.band];
+    const x = f.x + dx;
+    const y = f.y + dy;
+    if (x < -BASE_FW || x > W + BASE_FW || y < -BASE_FH || y > H + BASE_FH) return -1;
+    const px = mx * W, py = my * H;
+    const dxm = x - px, dym = y - py;
+    const d2 = dxm * dxm + dym * dym;
+    if (d2 > PROX_RADIUS * PROX_RADIUS) return band.alpha;
+    const dist = Math.sqrt(d2);
+    const boost = (1 - dist / PROX_RADIUS) * PROX_BOOST * band.proxMul;
+    return band.alpha + boost;
+  }
+
   // ---- icon drawing ----------------------------------------
-  // Draw a tiny memory frame at (cx, cy) with given alpha and scale.
-  // iconType: 0=aperture, 1=play, 2=hex, 3=glasses, 4=sensor-grid
-  function drawFrame(cell, dx, dy, alpha) {
-    const x = cell.cx + dx;
-    const y = cell.cy + dy;
-    const fw = (CELL_W - FRAME_PAD * 2) * cell.scale;
-    const fh = (CELL_H - FRAME_PAD * 2) * cell.scale;
+  // iconKind: 0=aperture, 1=play, 2=hex, 3=glasses, 4=sensor-grid
+  function drawFrame(f, dx, dy, alpha) {
+    const band = BANDS[f.band];
+    const x = f.x + dx;
+    const y = f.y + dy;
+    const fw = BASE_FW * band.scale;
+    const fh = BASE_FH * band.scale;
     const fx = x - fw / 2;
     const fy = y - fh / 2;
     const a = Math.max(0, Math.min(1, alpha));
     const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
 
-    // soft inner fill (gives the photo-frame the dim "image area" look)
+    // soft inner fill (gives each frame a dim "image area" feel)
     ctx.fillStyle = `rgba(255,255,255,${a * 0.04})`;
     ctx.fillRect(fx, fy, fw, fh);
 
     // outer frame stroke
-    ctx.strokeStyle = warm + (a * 0.85) + ')';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = warm + (a * 0.9) + ')';
+    ctx.lineWidth = band.stroke;
     ctx.strokeRect(fx + 0.5, fy + 0.5, fw - 1, fh - 1);
 
-    // tiny L-corner accents (film-frame feel) — top-left + bottom-right only
-    const corn = 4;
-    ctx.strokeStyle = warm + (a * 1.4) + ')';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
-    ctx.moveTo(fx + fw + 1, fy + fh - corn); ctx.lineTo(fx + fw + 1, fy + fh + 1); ctx.lineTo(fx + fw - corn, fy + fh + 1);
-    ctx.stroke();
-
-    // inner icon
-    const ix = x, iy = y;
-    const r = Math.min(fw, fh) * 0.18;
-    ctx.strokeStyle = warm + (a * 1.1) + ')';
-    ctx.fillStyle = warm + (a * 1.1) + ')';
-    ctx.lineWidth = 1;
-    switch (cell.iconType) {
-      case 0: // aperture: 2 concentric circles
-        ctx.beginPath(); ctx.arc(ix, iy, r, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(ix, iy, r * 0.45, 0, Math.PI * 2); ctx.stroke();
-        break;
-      case 1: // play triangle
-        ctx.beginPath();
-        ctx.moveTo(ix - r * 0.7, iy - r);
-        ctx.lineTo(ix + r, iy);
-        ctx.lineTo(ix - r * 0.7, iy + r);
-        ctx.closePath();
-        ctx.fill();
-        break;
-      case 2: // hexagon wireframe
-        ctx.beginPath();
-        for (let k = 0; k < 6; k++) {
-          const ang = (Math.PI / 3) * k - Math.PI / 6;
-          const px = ix + Math.cos(ang) * r;
-          const py = iy + Math.sin(ang) * r;
-          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        break;
-      case 3: // glasses (two small circles + bridge)
-        ctx.beginPath(); ctx.arc(ix - r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(ix + r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(ix - r * 0.18, iy); ctx.lineTo(ix + r * 0.18, iy); ctx.stroke();
-        break;
-      case 4: // 2x2 sensor grid of dots
-        const off = r * 0.45;
-        for (let dxk = -1; dxk <= 1; dxk += 2) {
-          for (let dyk = -1; dyk <= 1; dyk += 2) {
-            ctx.beginPath();
-            ctx.arc(ix + dxk * off, iy + dyk * off, 1.2, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-        break;
-    }
-  }
-
-  // ---- draw loop -------------------------------------------
-  function alphaForCell(cell, dx, dy) {
-    const x = cell.cx + dx;
-    const y = cell.cy + dy;
-    // off-screen? skip
-    if (x < -CELL_W || x > W + CELL_W || y < -CELL_H || y > H + CELL_H) return -1;
-    const px = mx * W, py = my * H;
-    const distSq = (x - px) * (x - px) + (y - py) * (y - py);
-    if (distSq > PROX_RADIUS * PROX_RADIUS) return BASE_ALPHA;
-    const dist = Math.sqrt(distSq);
-    const boost = (1 - dist / PROX_RADIUS) * PROX_BOOST;
-    return BASE_ALPHA + boost;
-  }
-
-  function draw(time) {
-    // smooth mouse
-    smx += (mx - smx) * 0.07;
-    smy += (my - smy) * 0.07;
-
-    ctx.clearRect(0, 0, W, H);
-
-    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.015;
-
-    // 1) edges first (so frames sit on top)
-    for (const e of edges) {
-      const A = cells[e.a], B = cells[e.b];
-      const dxA = (smx - 0.5) * PARALLAX_X * A.depth;
-      const dyA = (smy - 0.5) * PARALLAX_Y * A.depth;
-      const dxB = (smx - 0.5) * PARALLAX_X * B.depth;
-      const dyB = (smy - 0.5) * PARALLAX_Y * B.depth;
-      // average proximity for the edge
-      const aA = alphaForCell(A, dxA, dyA);
-      const aB = alphaForCell(B, dxB, dyB);
-      if (aA < 0 && aB < 0) continue;
-      const avg = ((aA < 0 ? BASE_ALPHA : aA) + (aB < 0 ? BASE_ALPHA : aB)) / 2;
-      const lineA = LINE_ALPHA + (avg - BASE_ALPHA) * 0.7 + breathing;
-      ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${Math.max(0, lineA)})`;
-      ctx.lineWidth = 0.6;
+    // L-corner accents — skip on tiny distant frames
+    if (band.scale > 0.55) {
+      const corn = 4 * band.scale;
+      ctx.strokeStyle = warm + (a * 1.5) + ')';
       ctx.beginPath();
-      ctx.moveTo(A.cx + dxA, A.cy + dyA);
-      ctx.lineTo(B.cx + dxB, B.cy + dyB);
+      ctx.moveTo(fx - 1, fy + corn); ctx.lineTo(fx - 1, fy - 1); ctx.lineTo(fx + corn, fy - 1);
+      ctx.moveTo(fx + fw + 1, fy + fh - corn); ctx.lineTo(fx + fw + 1, fy + fh + 1); ctx.lineTo(fx + fw - corn, fy + fh + 1);
       ctx.stroke();
     }
 
-    // 2) frames + center nodes
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells[i];
-      if (!cell.active) continue;
-      const dx = (smx - 0.5) * PARALLAX_X * cell.depth;
-      const dy = (smy - 0.5) * PARALLAX_Y * cell.depth;
-      const a = alphaForCell(cell, dx, dy);
-      if (a < 0) continue;
-      drawFrame(cell, dx, dy, a + breathing);
-      // tiny center node dot
-      ctx.fillStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${NODE_ALPHA + (a - BASE_ALPHA) * 1.2})`;
-      ctx.beginPath();
-      ctx.arc(cell.cx + dx, cell.cy + dy, 1.6, 0, Math.PI * 2);
-      ctx.fill();
+    // inner icon — only on bands where it'll read
+    if (band.scale > 0.5) {
+      const ix = x, iy = y;
+      const r = Math.min(fw, fh) * 0.18;
+      ctx.strokeStyle = warm + (a * 1.15) + ')';
+      ctx.fillStyle = warm + (a * 1.15) + ')';
+      ctx.lineWidth = band.stroke;
+      switch (f.iconKind) {
+        case 0:
+          ctx.beginPath(); ctx.arc(ix, iy, r, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(ix, iy, r * 0.45, 0, Math.PI * 2); ctx.stroke();
+          break;
+        case 1:
+          ctx.beginPath();
+          ctx.moveTo(ix - r * 0.7, iy - r);
+          ctx.lineTo(ix + r, iy);
+          ctx.lineTo(ix - r * 0.7, iy + r);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        case 2:
+          ctx.beginPath();
+          for (let k = 0; k < 6; k++) {
+            const ang = (Math.PI / 3) * k - Math.PI / 6;
+            const px = ix + Math.cos(ang) * r;
+            const py = iy + Math.sin(ang) * r;
+            if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+          break;
+        case 3:
+          ctx.beginPath(); ctx.arc(ix - r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(ix + r * 0.6, iy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(ix - r * 0.18, iy); ctx.lineTo(ix + r * 0.18, iy); ctx.stroke();
+          break;
+        case 4: {
+          const off = r * 0.45;
+          for (let dxk = -1; dxk <= 1; dxk += 2) {
+            for (let dyk = -1; dyk <= 1; dyk += 2) {
+              ctx.beginPath();
+              ctx.arc(ix + dxk * off, iy + dyk * off, 1.2 * band.scale, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    // center anchor dot — drawn even on distant band so it reads as a "star"
+    ctx.fillStyle = warm + (a * 1.3) + ')';
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(0.7, 1.5 * band.scale), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ---- draw loop -------------------------------------------
+  function draw(time) {
+    smx += (mx - smx) * 0.12;
+    smy += (my - smy) * 0.12;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const breathing = isStatic ? 0 : Math.sin((time || 0) * 0.0004) * 0.04;
+    const cx = smx - 0.5;
+    const cy = smy - 0.5;
+
+    // back-to-front: distant band first, foreground last
+    for (let bIdx = BANDS.length - 1; bIdx >= 0; bIdx--) {
+      // 1) edges whose nearer endpoint is in this band
+      for (const e of edgesByBand[bIdx]) {
+        const A = frames[e.a], B = frames[e.b];
+        const bA = BANDS[A.band], bB = BANDS[B.band];
+        const dxA = -cx * bA.pxX * 2 + A.jx;
+        const dyA = -cy * bA.pxY * 2 + A.jy;
+        const dxB = -cx * bB.pxX * 2 + B.jx;
+        const dyB = -cy * bB.pxY * 2 + B.jy;
+        const aA = alphaForFrame(A, dxA, dyA);
+        const aB = alphaForFrame(B, dxB, dyB);
+        if (aA < 0 && aB < 0) continue;
+        const baseLineA = Math.min(bA.alpha, bB.alpha) * 0.5;
+        const boost = ((aA < 0 ? 0 : aA - bA.alpha) + (aB < 0 ? 0 : aB - bB.alpha)) * 0.55;
+        const lineA = Math.max(0, baseLineA + boost + breathing * 0.3);
+        ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${lineA})`;
+        ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(A.x + dxA, A.y + dyA);
+        ctx.lineTo(B.x + dxB, B.y + dyB);
+        ctx.stroke();
+      }
+
+      // 2) frames in this band
+      const band = BANDS[bIdx];
+      const dxBase = -cx * band.pxX * 2;
+      const dyBase = -cy * band.pxY * 2;
+      for (const i of bandIndex[bIdx]) {
+        const f = frames[i];
+        const dx = dxBase + f.jx;
+        const dy = dyBase + f.jy;
+        const a = alphaForFrame(f, dx, dy);
+        if (a < 0) continue;
+        drawFrame(f, dx, dy, a + breathing);
+      }
     }
 
     if (!isStatic) rafId = requestAnimationFrame(draw);
