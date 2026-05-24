@@ -10,15 +10,13 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
    ---------------------------------------------------------- */
 
 /* ============================================================
-   Memory volume — fixed, cursor-driven background (v5)
-   Tilted polaroid thumbnails drift gently in a depth field;
-   the cursor opens a well that sinks nearby frames and pushes
-   rim frames outward; threads sag in soft curves with a slow
-   flowing dash; one rim frame is "selected" per moment; a
-   random frame occasionally flickers (memory surfaces) and
-   periodically a chain of connected frames lights up in
-   sequence (associative cascade). Velocity wake drags the
-   field slightly behind fast cursor motion.
+   Memory field — fixed background (v6)
+   Three depth layers of POV thumbnails float gently on slow
+   sine drift. A virtual cursor patrols the screen at ~25 px/s
+   and softly brightens, adds a whitish-blue border, and tilts
+   frames it passes (bottom layer fully; middle at half). The
+   real mouse cursor does the same for the top layer (and
+   middle at half). No parallax — only frames within range react.
    ============================================================ */
 (function initBgCanvas() {
   const canvas = document.getElementById('bg-canvas');
@@ -26,79 +24,53 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   const ctx = canvas.getContext('2d', { alpha: true });
   if (!ctx) return;
 
-  // ---- depth bands (visual depth + per-band tint) ----------
-  // Band 0 = closest (warmest); band 4 = farthest (slightly cooler)
-  const BANDS = [
-    { scale: 1.40, alpha: 0.175, stroke: 1.5,  weight: 0.08, tint: [255, 184, 107], tintA: 0.045 },
-    { scale: 1.10, alpha: 0.125, stroke: 1.0,  weight: 0.14, tint: [235, 178, 130], tintA: 0.030 },
-    { scale: 0.85, alpha: 0.085, stroke: 0.75, weight: 0.20, tint: [200, 180, 170], tintA: 0.025 },
-    { scale: 0.60, alpha: 0.055, stroke: 0.5,  weight: 0.26, tint: [160, 178, 210], tintA: 0.030 },
-    { scale: 0.40, alpha: 0.032, stroke: 0.4,  weight: 0.32, tint: [127, 183, 255], tintA: 0.040 },
+  // ---- layers: 0 = top (user cursor), 2 = bottom (virtual) --
+  const LAYERS = [
+    { scale: 1.30, baseAlpha: 0.20, driftAmp: 4.0, count: 25 },
+    { scale: 1.00, baseAlpha: 0.13, driftAmp: 3.0, count: 55 },
+    { scale: 0.70, baseAlpha: 0.07, driftAmp: 2.0, count: 110 },
   ];
   const BASE_FS = 88;
-  const DENSITY = 6800;
-  const CONN_RADIUS = 210;
-  const CONN_RATE = 0.34;
-  const WARM = [255, 184, 107];
 
-  // ---- POV thumbnail sheet (color-graded on load) ----------
+  // ---- 4 staggered opacity oscillator groups -----------------
+  const OSC = [
+    { freq: 0.00028, phase: 0.0 },
+    { freq: 0.00021, phase: 1.7 },
+    { freq: 0.00035, phase: 3.1 },
+    { freq: 0.00018, phase: 4.5 },
+  ];
+
+  // ---- cursor interaction params -----------------------------
+  const INFLUENCE_R = 220;
+  const ROT_MAX     = 0.07;   // ~4° max tilt under cursor
+  const LERP_IN     = 0.045;  // speed approaching boosted state
+  const LERP_OUT    = 0.025;  // speed receding (slower = soft linger)
+  const GLOW_RGB    = '200,220,255';
+
+  // ---- sprite sheet (color-graded once on load) -------------
   const SHEET_COLS = 9, SHEET_ROWS = 9;
   const sheet = new Image();
   let sheetReady = false;
-  let sheetSrc = null;  // either the Image or an offscreen canvas (graded)
+  let sheetSrc = null;
   let cellPxW = 0, cellPxH = 0;
   sheet.onload = () => {
     if (!sheet.naturalWidth) return;
-    cellPxW = sheet.naturalWidth / SHEET_COLS;
+    cellPxW = sheet.naturalWidth  / SHEET_COLS;
     cellPxH = sheet.naturalHeight / SHEET_ROWS;
     try {
       const oc = document.createElement('canvas');
-      oc.width = sheet.naturalWidth;
-      oc.height = sheet.naturalHeight;
+      oc.width = sheet.naturalWidth; oc.height = sheet.naturalHeight;
       const octx = oc.getContext('2d');
       if (octx && 'filter' in octx) {
         octx.filter = 'saturate(0.72) brightness(0.92) contrast(1.05)';
         octx.drawImage(sheet, 0, 0);
         sheetSrc = oc;
-      } else {
-        sheetSrc = sheet;
-      }
+      } else { sheetSrc = sheet; }
     } catch (e) { sheetSrc = sheet; }
     sheetReady = true;
     if (isStatic) drawOnce();
   };
   sheet.src = 'images/pov-sheet.png';
-
-  // ---- depth well ------------------------------------------
-  const WELL_RADIUS = 230;
-  const INNER_FRAC = 0.58;
-  const SINK_SCALE = 0.55;
-  const SINK_ALPHA = 0.55;
-  const RIM_SCALE_BOOST = 0.16;
-  const RIM_ALPHA_BOOST = 0.70;
-  const RIM_PUSH_PX = 12;
-
-  // ---- pulse -----------------------------------------------
-  const PULSE_DELAY = 600;
-  const PULSE_INTERVAL = 2800;
-  const PULSE_DURATION = 1400;
-  const PULSE_MAX_R = WELL_RADIUS * 1.6;
-  const PULSE_ALPHA = 0.045;
-
-  // ---- v5 motion + events ----------------------------------
-  const ROT_MAX = 0.07;           // base rotation ~±4°, scales up for closer bands
-  const DRIFT_AMP_MAX = 1.0;       // px, foreground; falls off with depth
-  const DRIFT_FREQ_X = 0.0006;
-  const DRIFT_FREQ_Y = 0.00045;
-  const ENTRY_DURATION = 900;
-  const FLICKER_MIN = 10000, FLICKER_MAX = 20000;
-  const FLICKER_DUR = 1100;
-  const CASCADE_MIN = 11000, CASCADE_MAX = 19000;
-  const CASCADE_HOP = 220;
-  const CASCADE_DEPTH = 5;
-  const WAKE_DECAY = 0.90;
-  const EDGE_DASH = [3, 5];
-  const EDGE_DASH_SPEED = 0.020;
 
   function mulberry32(seed) {
     return function () {
@@ -109,217 +81,115 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     };
   }
 
-  // ---- state -----------------------------------------------
+  // ---- state -------------------------------------------------
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W = 0, H = 0;
   let frames = [];
-  let bandIndex = [];
-  let edges = [];
-  let edgeIdx = [];        // per-frame: edge indices touching this frame
-  let wellCache = [];
-  let mx = -1, my = -1;
-  let smx = 0.5, smy = 0.5;
-  let lastClientX = 0, lastClientY = 0, lastMoveT = 0;
-  let wakeX = 0, wakeY = 0;
-  let rafId = 0;
+  let layerIndex = [];
   let mobile = window.innerWidth < 720;
   let isStatic = reduceMotion || mobile;
-  let lastMoveTime = 0;
-  let pulse = { active: false, r: 0, startTime: 0 };
-  let entryStartTime = 0;
-  let flickers = [];       // [{frameIdx, startTime}]
-  let nextFlickerTime = 0;
-  let cascade = null;      // { edges: [eId,...], frames: [fIdx,...], startTime }
-  let nextCascadeTime = 0;
-  let edgeFlash = new Map();   // eId -> 0..1 (cascade hop fade)
-  let frameFlash = new Map();  // fIdx -> 0..1 (cascade hop fade)
+  let rafId = 0;
 
-  // ---- build (called on init and resize) -------------------
+  // user cursor
+  let umx = -1, umy = -1;
+  let ucx = 0, ucy = 0;
+  let userActive = false;
+
+  // virtual cursor
+  let vcx = 0, vcy = 0;
+  let vcStartX = 0, vcStartY = 0;
+  let vtx = 0, vty = 0;
+  let vcStartT = 0, vcDurMs = 1;
+
+  function easeInOutSine(t) { return -(Math.cos(Math.PI * t) - 1) / 2; }
+
+  // ---- build grid -------------------------------------------
   function buildGrid() {
     const bleed = 100;
-    const area = (W + bleed * 2) * (H + bleed * 2);
-    const targetCount = Math.max(80, Math.floor(area / DENSITY));
     const rand = mulberry32(0x3F00);
-
     frames = [];
-    bandIndex = BANDS.map(() => []);
-    wellCache = [];
-    edgeIdx = [];
+    layerIndex = LAYERS.map(() => []);
 
-    const cum = [];
-    let acc = 0;
-    for (const b of BANDS) { acc += b.weight; cum.push(acc); }
-
-    for (let i = 0; i < targetCount; i++) {
-      const r = rand();
-      let band = 0;
-      while (band < cum.length - 1 && r > cum[band]) band++;
-      const x = -bleed + rand() * (W + bleed * 2);
-      const y = -bleed + rand() * (H + bleed * 2);
-      const iconKind = Math.floor(rand() * 5);
-      const spriteIdx = Math.floor(rand() * SHEET_COLS * SHEET_ROWS);
-      const jx = (rand() - 0.5) * 2;
-      const jy = (rand() - 0.5) * 1.5;
-      // closer bands tilt more (polaroid stack feel)
-      const bandRotMul = 1 + (BANDS.length - 1 - band) * 0.18;
-      const rot = (rand() - 0.5) * 2 * ROT_MAX * bandRotMul;
-      // drift amp falls off with depth
-      const driftAmp = DRIFT_AMP_MAX * (BANDS[band].scale / BANDS[0].scale);
-      const phase = rand() * Math.PI * 2;
-      // distant frames appear first (smaller scale), close frames last
-      const entryDelay =
-        (1 - BANDS[band].scale / BANDS[0].scale) * ENTRY_DURATION * 0.55 +
-        rand() * ENTRY_DURATION * 0.45;
-      frames.push({ x, y, band, iconKind, spriteIdx, jx, jy, rot, driftAmp, phase, entryDelay });
-      bandIndex[band].push(i);
-      wellCache.push({ dx: jx, dy: jy, scaleM: 1, alphaM: 1 });
-      edgeIdx.push([]);
-    }
-
-    edges = [];
-    const seen = new Set();
-    const erand = mulberry32(0xC0FFEE);
-    for (let i = 0; i < frames.length; i++) {
-      const a = frames[i];
-      const cand = [];
-      for (let j = 0; j < frames.length; j++) {
-        if (j === i) continue;
-        const b = frames[j];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < CONN_RADIUS * CONN_RADIUS) cand.push([d2, j]);
-      }
-      cand.sort((p, q) => p[0] - q[0]);
-      const take = Math.min(2, cand.length);
-      for (let k = 0; k < take; k++) {
-        const j = cand[k][1];
-        const key = i < j ? (i * 100000 + j) : (j * 100000 + i);
-        if (seen.has(key)) continue;
-        if (erand() < CONN_RATE) {
-          seen.add(key);
-          const eIdx = edges.length;
-          edges.push({ a: i, b: j });
-          edgeIdx[i].push(eIdx);
-          edgeIdx[j].push(eIdx);
-        }
+    for (let l = 0; l < LAYERS.length; l++) {
+      const lay = LAYERS[l];
+      for (let i = 0; i < lay.count; i++) {
+        const x = -bleed + rand() * (W + bleed * 2);
+        const y = -bleed + rand() * (H + bleed * 2);
+        const spriteIdx = Math.floor(rand() * SHEET_COLS * SHEET_ROWS);
+        const oscGroup  = Math.floor(rand() * OSC.length);
+        const baseRot   = (rand() - 0.5) * 0.035;        // ±1° stable tilt
+        const driftPhase = rand() * Math.PI * 2;
+        const rotSign   = rand() < 0.5 ? 1 : -1;          // stable tilt direction
+        const fi = frames.length;
+        frames.push({
+          x, y, layer: l, spriteIdx, oscGroup,
+          baseRot, driftPhase, rotSign,
+          driftAmp: lay.driftAmp,
+          cAlphaBoost: 0, cGlow: 0, cRotOffset: 0,
+        });
+        layerIndex[l].push(fi);
       }
     }
 
-    // reset event state
-    flickers.length = 0;
-    edgeFlash.clear();
-    frameFlash.clear();
-    cascade = null;
-    const now = performance.now();
-    nextFlickerTime = now + FLICKER_MIN + Math.random() * (FLICKER_MAX - FLICKER_MIN);
-    nextCascadeTime = now + CASCADE_MIN + Math.random() * (CASCADE_MAX - CASCADE_MIN);
-    entryStartTime = now;
+    vcx = W / 2; vcy = H / 2;
+    pickVcTarget(performance.now());
   }
 
-  // ---- resize ----------------------------------------------
-  function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    mobile = W < 720;
-    isStatic = reduceMotion || mobile;
-    canvas.width = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
-    canvas.style.width = W + 'px';
-    canvas.style.height = H + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'low';
-    buildGrid();
-    if (isStatic) drawOnce();
+  // ---- virtual cursor walk ----------------------------------
+  function pickVcTarget(now) {
+    vcStartX = vcx; vcStartY = vcy;
+    vtx = W * 0.1 + Math.random() * W * 0.8;
+    vty = H * 0.1 + Math.random() * H * 0.8;
+    const dist = Math.sqrt((vtx - vcx) ** 2 + (vty - vcy) ** 2);
+    vcDurMs = Math.max(2000, dist / 0.025);  // ~25 px/s
+    vcStartT = now;
   }
 
-  let resizeT;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeT);
-    resizeT = setTimeout(resize, 180);
-  });
+  function stepVcursor(now) {
+    const p = Math.min(1, (now - vcStartT) / vcDurMs);
+    const ep = easeInOutSine(p);
+    vcx = vcStartX + (vtx - vcStartX) * ep;
+    vcy = vcStartY + (vty - vcStartY) * ep;
+    if (p >= 1) pickVcTarget(now);
+  }
 
-  // ---- mouse tracking + velocity wake ----------------------
-  window.addEventListener('mousemove', (e) => {
-    const now = performance.now();
-    if (lastMoveT > 0) {
-      const dt = Math.max(1, now - lastMoveT);
-      const vx = (e.clientX - lastClientX) / dt;   // px/ms
-      const vy = (e.clientY - lastClientY) / dt;
-      // accumulate wake — decays per frame in draw()
-      wakeX += vx * -1.5;   // negative: field drags behind cursor
-      wakeY += vy * -1.5;
-      // cap so a flick doesn't fling the whole field
-      const wm = 8;
-      if (wakeX >  wm) wakeX =  wm;
-      if (wakeX < -wm) wakeX = -wm;
-      if (wakeY >  wm) wakeY =  wm;
-      if (wakeY < -wm) wakeY = -wm;
-    }
-    lastClientX = e.clientX; lastClientY = e.clientY;
-    lastMoveT = now;
-    mx = e.clientX / W;
-    my = e.clientY / H;
-    lastMoveTime = now;
-    if (pulse.active && (lastMoveTime - pulse.startTime) < 200) pulse.active = false;
-  }, { passive: true });
-
-  window.addEventListener('mouseleave', () => { mx = -1; my = -1; });
-  window.addEventListener('blur', () => { mx = -1; my = -1; });
-
-  // ---- well + per-frame drift (fills wellCache in-place) ---
-  function computeWell(time) {
-    const t = time || 0;
-    const driftOn = isStatic ? 0 : 1;
-    if (mx < 0 || isStatic) {
-      for (let i = 0; i < frames.length; i++) {
-        const f = frames[i];
-        const w = wellCache[i];
-        w.dx = f.jx + Math.sin(t * DRIFT_FREQ_X + f.phase) * f.driftAmp * driftOn;
-        w.dy = f.jy + Math.cos(t * DRIFT_FREQ_Y + f.phase) * f.driftAmp * 0.7 * driftOn;
-        w.scaleM = 1; w.alphaM = 1;
-      }
-      return;
-    }
-    const cx = smx * W, cy = smy * H;
-    const invR = 1 / WELL_RADIUS;
-    const invInner = 1 / INNER_FRAC;
-    const invRim = 1 / (1 - INNER_FRAC);
+  // ---- interaction lerp (fills cAlphaBoost/cGlow/cRotOffset)-
+  function computeInteractions() {
+    const ucOn = userActive;
+    const invR = 1 / INFLUENCE_R;
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i];
-      const w = wellCache[i];
-      const driftX = Math.sin(t * DRIFT_FREQ_X + f.phase) * f.driftAmp;
-      const driftY = Math.cos(t * DRIFT_FREQ_Y + f.phase) * f.driftAmp * 0.7;
-      const ddx = f.x - cx, ddy = f.y - cy;
-      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-      const r = dist * invR;
-      if (r >= 1.0) {
-        w.dx = f.jx + driftX; w.dy = f.jy + driftY;
-        w.scaleM = 1; w.alphaM = 1;
-        continue;
+      let tBoost = 0, tGlow = 0, tRot = 0;
+
+      function apply(cx, cy, intensity) {
+        const dx = f.x - cx, dy = f.y - cy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d >= INFLUENCE_R) return;
+        let k = 1 - d * invR; k *= k;  // softened falloff
+        tBoost += k * 0.9  * intensity;
+        tGlow  += k * 0.55 * intensity;
+        tRot   += f.rotSign * k * intensity * ROT_MAX;
       }
-      if (r < INNER_FRAC) {
-        const tt = r * invInner;
-        w.scaleM = SINK_SCALE + (1 - SINK_SCALE) * tt;
-        w.alphaM = SINK_ALPHA + (1 - SINK_ALPHA) * tt;
-        // dampen drift inside the well
-        w.dx = f.jx + driftX * tt;
-        w.dy = f.jy + driftY * tt;
+
+      if (f.layer === 0) {
+        if (ucOn) apply(ucx, ucy, 1.0);
+      } else if (f.layer === 1) {
+        if (ucOn) apply(ucx, ucy, 0.5);
+        apply(vcx, vcy, 0.5);
       } else {
-        const tt = (r - INNER_FRAC) * invRim;
-        const rim = Math.sin(tt * Math.PI);
-        w.scaleM = 1 + rim * RIM_SCALE_BOOST;
-        w.alphaM = 1 + rim * RIM_ALPHA_BOOST;
-        const push = rim * RIM_PUSH_PX;
-        const inv = dist > 0.0001 ? 1 / dist : 0;
-        w.dx = f.jx + driftX + ddx * inv * push;
-        w.dy = f.jy + driftY + ddy * inv * push;
+        apply(vcx, vcy, 1.0);
       }
+
+      const bLerp = tBoost > f.cAlphaBoost ? LERP_IN : LERP_OUT;
+      const gLerp = tGlow  > f.cGlow       ? LERP_IN : LERP_OUT;
+      const rLerp = Math.abs(tRot) > Math.abs(f.cRotOffset) ? LERP_IN : LERP_OUT;
+      f.cAlphaBoost += (tBoost - f.cAlphaBoost) * bLerp;
+      f.cGlow       += (tGlow  - f.cGlow)        * gLerp;
+      f.cRotOffset  += (tRot   - f.cRotOffset)   * rLerp;
     }
   }
 
-  // ---- helpers ---------------------------------------------
+  // ---- rounded-rect path helper -----------------------------
   function pathRoundRect(x, y, w, h, r) {
     if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
     ctx.beginPath();
@@ -331,338 +201,112 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
     ctx.closePath();
   }
 
-  function flickerFor(idx, time) {
-    for (let k = 0; k < flickers.length; k++) {
-      if (flickers[k].frameIdx === idx) {
-        const p = (time - flickers[k].startTime) / FLICKER_DUR;
-        if (p < 0 || p >= 1) continue;
-        const bell = p < 0.3 ? (p / 0.3) : (1 - (p - 0.3) / 0.7);
-        return { boost: 1 + bell * 1.1, glow: bell * 0.7 };
-      }
-    }
-    const cf = frameFlash.get(idx);
-    if (cf && cf > 0) return { boost: 1 + cf * 1.4, glow: cf * 0.85 };
-    return null;
+  // ---- resize -----------------------------------------------
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    mobile = W < 720; isStatic = reduceMotion || mobile;
+    canvas.width  = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low';
+    buildGrid();
+    if (isStatic) drawOnce();
   }
 
-  function tickEvents(time) {
-    // prune expired flickers
-    for (let k = flickers.length - 1; k >= 0; k--) {
-      if (time - flickers[k].startTime > FLICKER_DUR) flickers.splice(k, 1);
-    }
-    // spawn new flicker
-    if (frames.length && time > nextFlickerTime && flickers.length < 2) {
-      flickers.push({ frameIdx: Math.floor(Math.random() * frames.length), startTime: time });
-      nextFlickerTime = time + FLICKER_MIN + Math.random() * (FLICKER_MAX - FLICKER_MIN);
-    }
-    // schedule new cascade
-    if (!cascade && frames.length && time > nextCascadeTime) {
-      const seed = Math.floor(Math.random() * frames.length);
-      if (edgeIdx[seed] && edgeIdx[seed].length > 0) {
-        const seen = new Set([seed]);
-        const order = [seed];
-        const depthOf = new Map([[seed, 0]]);
-        const queue = [seed];
-        while (queue.length && order.length < 10) {
-          const cur = queue.shift();
-          const d = depthOf.get(cur);
-          if (d >= CASCADE_DEPTH) continue;
-          for (const eId of edgeIdx[cur]) {
-            const e = edges[eId];
-            const other = e.a === cur ? e.b : e.a;
-            if (!seen.has(other)) {
-              seen.add(other);
-              depthOf.set(other, d + 1);
-              order.push(other);
-              queue.push(other);
-            }
-          }
-        }
-        const chainEdges = [];
-        for (let i = 1; i < order.length; i++) {
-          const prev = order[i - 1], cur = order[i];
-          for (const eId of edgeIdx[cur]) {
-            const e = edges[eId];
-            if ((e.a === prev && e.b === cur) || (e.b === prev && e.a === cur)) {
-              chainEdges.push(eId);
-              break;
-            }
-          }
-        }
-        if (chainEdges.length > 0) {
-          cascade = { edges: chainEdges, frames: order, startTime: time };
-        }
-      }
-      nextCascadeTime = time + CASCADE_MIN + Math.random() * (CASCADE_MAX - CASCADE_MIN);
-    }
-    // step cascade — recompute flashes each tick
-    edgeFlash.clear();
-    frameFlash.clear();
-    if (cascade) {
-      const elapsed = time - cascade.startTime;
-      const totalDur = cascade.edges.length * CASCADE_HOP + 700;
-      if (elapsed > totalDur) {
-        cascade = null;
-      } else {
-        for (let i = 0; i < cascade.edges.length; i++) {
-          const startAt = i * CASCADE_HOP;
-          const localT = elapsed - startAt;
-          if (localT >= 0 && localT < 600) edgeFlash.set(cascade.edges[i], 1 - localT / 600);
-        }
-        for (let i = 0; i < cascade.frames.length; i++) {
-          const startAt = i === 0 ? 0 : (i - 1) * CASCADE_HOP + 100;
-          const localT = elapsed - startAt;
-          if (localT >= 0 && localT < 700) frameFlash.set(cascade.frames[i], 1 - localT / 700);
-        }
-      }
-    }
-  }
+  let resizeT;
+  window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(resize, 180); });
 
-  // ---- frame drawing ----------------------------------------
-  function drawFrame(f, idx, time, dx, dy, alpha, scaleOverride, isWinner) {
-    const band = BANDS[f.band];
-    const totalScale = band.scale * scaleOverride;
-    const x = f.x + dx;
-    const y = f.y + dy;
-    const fw = BASE_FS * totalScale;
-    const fh = fw;
-    const hw = fw / 2, hh = fh / 2;
-    const a = Math.max(0, Math.min(1, alpha));
-    const warm = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},`;
-    const cornerR = Math.max(1, 3 * totalScale);
+  // ---- mouse tracking ---------------------------------------
+  window.addEventListener('mousemove', (e) => {
+    umx = e.clientX; umy = e.clientY; userActive = true;
+  }, { passive: true });
+  window.addEventListener('mouseleave', () => { userActive = false; });
+  window.addEventListener('blur',       () => { userActive = false; });
 
-    // event modulation
-    const flk = flickerFor(idx, time);
-    const flkBoost = flk ? flk.boost : 1;
-    const flkGlow = flk ? flk.glow : 0;
-    const effA = Math.min(1, a * flkBoost);
-
-    ctx.save();
-    ctx.translate(x, y);
-    if (f.rot) ctx.rotate(f.rot);
-
-    // outer glow (flicker or winner) — drawn under the thumbnail
-    if (flkGlow > 0.04 || isWinner) {
-      const glowA = Math.max(flkGlow * 0.22, isWinner ? 0.18 : 0);
-      ctx.strokeStyle = warm + glowA + ')';
-      ctx.lineWidth = 8 * totalScale;
-      pathRoundRect(-hw - 2, -hh - 2, fw + 4, fh + 4, cornerR + 3);
-      ctx.stroke();
-    }
-
-    // thumbnail (clipped to rounded rect), with drop shadow for closer bands
-    if (sheetReady && sheetSrc) {
-      const col = f.spriteIdx % SHEET_COLS;
-      const row = (f.spriteIdx / SHEET_COLS) | 0;
-      ctx.save();
-      if (totalScale > 0.85) {
-        ctx.shadowColor = 'rgba(0,0,0,0.45)';
-        ctx.shadowBlur = 9 * totalScale;
-        ctx.shadowOffsetY = 3 * totalScale;
-      }
-      const prevAlpha = ctx.globalAlpha;
-      ctx.globalAlpha = Math.min(1, effA * 1.0);
-      pathRoundRect(-hw, -hh, fw, fh, cornerR);
-      ctx.clip();
-      ctx.drawImage(sheetSrc, col * cellPxW, row * cellPxH, cellPxW, cellPxH, -hw, -hh, fw, fh);
-      // per-band tint multiply
-      if (band.tintA > 0) {
-        ctx.fillStyle = `rgba(${band.tint[0]},${band.tint[1]},${band.tint[2]},${band.tintA})`;
-        ctx.fillRect(-hw, -hh, fw, fh);
-      }
-      ctx.globalAlpha = prevAlpha;
-      ctx.restore();  // drops the shadow + clip together
-    } else if (!sheetReady) {
-      ctx.fillStyle = `rgba(255,255,255,${effA * 0.04})`;
-      pathRoundRect(-hw, -hh, fw, fh, cornerR);
-      ctx.fill();
-    }
-
-    // border
-    ctx.strokeStyle = warm + (effA * (isWinner ? 1.8 : 0.9)) + ')';
-    ctx.lineWidth = band.stroke * (isWinner ? 1.6 : 1);
-    pathRoundRect(-hw + 0.5, -hh + 0.5, fw - 1, fh - 1, cornerR);
-    ctx.stroke();
-
-    // 4 L-corner accents (local coords)
-    if (totalScale > 0.55) {
-      const corn = 4 * totalScale;
-      ctx.strokeStyle = warm + (effA * 1.5) + ')';
-      ctx.beginPath();
-      ctx.moveTo(-hw - 1, -hh + corn); ctx.lineTo(-hw - 1, -hh - 1); ctx.lineTo(-hw + corn, -hh - 1);
-      ctx.moveTo(hw - corn, -hh - 1);  ctx.lineTo(hw + 1, -hh - 1);  ctx.lineTo(hw + 1, -hh + corn);
-      ctx.moveTo(-hw - 1, hh - corn);  ctx.lineTo(-hw - 1, hh + 1);  ctx.lineTo(-hw + corn, hh + 1);
-      ctx.moveTo(hw + 1, hh - corn);   ctx.lineTo(hw + 1, hh + 1);   ctx.lineTo(hw - corn, hh + 1);
-      ctx.stroke();
-    }
-
-    // fallback icon while sheet loads
-    if (!sheetReady && totalScale > 0.5) {
-      const r = Math.min(fw, fh) * 0.18;
-      ctx.strokeStyle = warm + (effA * 1.15) + ')';
-      ctx.fillStyle = warm + (effA * 1.15) + ')';
-      ctx.lineWidth = band.stroke;
-      switch (f.iconKind) {
-        case 0:
-          ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2); ctx.stroke(); break;
-        case 1:
-          ctx.beginPath(); ctx.moveTo(-r * 0.7, -r); ctx.lineTo(r, 0); ctx.lineTo(-r * 0.7, r); ctx.closePath(); ctx.fill(); break;
-        case 2:
-          ctx.beginPath();
-          for (let k = 0; k < 6; k++) {
-            const ang = (Math.PI / 3) * k - Math.PI / 6;
-            const px = Math.cos(ang) * r, py = Math.sin(ang) * r;
-            if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          }
-          ctx.closePath(); ctx.stroke(); break;
-        case 3:
-          ctx.beginPath(); ctx.arc(-r * 0.6, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.arc( r * 0.6, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(-r * 0.18, 0); ctx.lineTo(r * 0.18, 0); ctx.stroke(); break;
-        case 4: {
-          const off = r * 0.45;
-          for (let dxk = -1; dxk <= 1; dxk += 2) {
-            for (let dyk = -1; dyk <= 1; dyk += 2) {
-              ctx.beginPath();
-              ctx.arc(dxk * off, dyk * off, 1.2 * totalScale, 0, Math.PI * 2);
-              ctx.fill();
-            }
-          }
-          break;
-        }
-      }
-    }
-
-    // center dot
-    ctx.fillStyle = warm + (effA * 1.3) + ')';
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(0.7, 1.5 * totalScale), 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  // ---- draw loop -------------------------------------------
+  // ---- draw loop --------------------------------------------
   function draw(time) {
     const t = time || performance.now();
-    if (mx >= 0) {
-      smx += (mx - smx) * 0.10;
-      smy += (my - smy) * 0.10;
+
+    if (userActive) {
+      ucx += (umx - ucx) * 0.08;
+      ucy += (umy - ucy) * 0.08;
     }
-    // wake decay
-    wakeX *= WAKE_DECAY;
-    wakeY *= WAKE_DECAY;
-    if (Math.abs(wakeX) < 0.04) wakeX = 0;
-    if (Math.abs(wakeY) < 0.04) wakeY = 0;
+    if (!isStatic) stepVcursor(t);
+    computeInteractions();
 
     ctx.clearRect(0, 0, W, H);
 
-    const breathing = isStatic ? 0 : Math.sin(t * 0.0004) * 0.035;
-
-    if (!isStatic) tickEvents(t);
-
-    computeWell(t);
-
-    // find rim "winner" (frame at peak of rim band)
-    let winnerIdx = -1, winnerScore = 0;
-    if (mx >= 0 && !isStatic) {
-      const cx = smx * W, cy = smy * H;
-      for (let i = 0; i < frames.length; i++) {
-        const f = frames[i];
-        const ddx = f.x - cx, ddy = f.y - cy;
-        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        const r = dist / WELL_RADIUS;
-        if (r >= INNER_FRAC && r < 1.0) {
-          const tt = (r - INNER_FRAC) / (1 - INNER_FRAC);
-          const rim = Math.sin(tt * Math.PI);
-          if (rim > winnerScore) { winnerScore = rim; winnerIdx = i; }
-        }
-      }
-    }
-
-    // entry stagger
-    const entryT = t - entryStartTime;
-    const inEntry = entryT < ENTRY_DURATION + 700;
-
-    // edges — soft curve + flowing dash
-    if (!isStatic) {
-      ctx.setLineDash(EDGE_DASH);
-      ctx.lineDashOffset = -(t * EDGE_DASH_SPEED);
-    }
-    for (let e = 0; e < edges.length; e++) {
-      const edge = edges[e];
-      const A = frames[edge.a], B = frames[edge.b];
-      const wA = wellCache[edge.a], wB = wellCache[edge.b];
-      const bA = BANDS[A.band], bB = BANDS[B.band];
-      const baseLineA = Math.min(bA.alpha, bB.alpha) * 0.5;
-      let lineA = baseLineA * Math.min(wA.alphaM, wB.alphaM) + breathing * 0.25;
-      const flashAmt = edgeFlash.get(e) || 0;
-      if (flashAmt > 0) lineA += flashAmt * 0.20;
-      if (lineA < 0.004) continue;
-      const ax = A.x + wA.dx + wakeX * 0.35, ay = A.y + wA.dy + wakeY * 0.35;
-      const bx = B.x + wB.dx + wakeX * 0.35, by = B.y + wB.dy + wakeY * 0.35;
-      const ex = bx - ax, ey = by - ay;
-      const elen = Math.sqrt(ex * ex + ey * ey) || 1;
-      const sag = elen * 0.08;
-      const mxp = (ax + bx) / 2 + (-ey / elen) * sag;
-      const myp = (ay + by) / 2 + ( ex / elen) * sag;
-      ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${Math.max(0, lineA)})`;
-      ctx.lineWidth = Math.min(bA.stroke, bB.stroke) * 0.7 + flashAmt * 0.5;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.quadraticCurveTo(mxp, myp, bx, by);
-      ctx.stroke();
-    }
-    if (!isStatic) ctx.setLineDash([]);
-
-    // frames back-to-front
-    for (let bIdx = BANDS.length - 1; bIdx >= 0; bIdx--) {
-      const band = BANDS[bIdx];
-      const list = bandIndex[bIdx];
+    // draw bottom → top (layer 2 first, then 1, then 0)
+    for (let l = LAYERS.length - 1; l >= 0; l--) {
+      const lay = LAYERS[l];
+      const list = layerIndex[l];
       for (let k = 0; k < list.length; k++) {
-        const i = list[k];
-        const f = frames[i];
-        const w = wellCache[i];
-        const fx = f.x + w.dx + wakeX, fy = f.y + w.dy + wakeY;
-        if (fx < -BASE_FS * 2 || fx > W + BASE_FS * 2 || fy < -BASE_FS * 2 || fy > H + BASE_FS * 2) continue;
-        let entryMul = 1;
-        if (inEntry) {
-          const after = entryT - f.entryDelay;
-          if (after < 0) continue;
-          entryMul = Math.min(1, after / 420);
-        }
-        const a = (band.alpha * w.alphaM + breathing) * entryMul;
-        if (a < 0.004) continue;
-        drawFrame(f, i, t, w.dx + wakeX, w.dy + wakeY, Math.min(1, a), w.scaleM, i === winnerIdx);
-      }
-    }
+        const f = frames[list[k]];
 
-    // idle capture pulse
-    if (!isStatic && mx >= 0) {
-      const now = t;
-      const elapsed = now - lastMoveTime;
-      if (!pulse.active && elapsed > PULSE_DELAY) {
-        const since = elapsed - PULSE_DELAY;
-        const phase = since % PULSE_INTERVAL;
-        if (phase < PULSE_DURATION) {
-          pulse.active = true;
-          pulse.startTime = now - phase;
-        }
-      }
-      if (pulse.active) {
-        const p = (now - pulse.startTime) / PULSE_DURATION;
-        if (p >= 1) {
-          pulse.active = false;
+        // cull frames well off-screen
+        const hw = (BASE_FS * lay.scale) / 2;
+        if (f.x < -hw * 3 || f.x > W + hw * 3 ||
+            f.y < -hw * 3 || f.y > H + hw * 3) continue;
+
+        // slow sine float (no translation from cursor)
+        const floatX = Math.sin(t * 0.00040 + f.driftPhase) * f.driftAmp;
+        const floatY = Math.cos(t * 0.00031 + f.driftPhase) * f.driftAmp * 0.7;
+
+        // oscillation group breathing
+        const osc = OSC[f.oscGroup];
+        const oscM = 1 + Math.sin(t * osc.freq + osc.phase) * 0.30;
+
+        const baseA = lay.baseAlpha * oscM;
+        const a = Math.min(1, baseA * (1 + f.cAlphaBoost * 1.2));
+        if (a < 0.005) continue;
+
+        const px = f.x + floatX;
+        const py = f.y + floatY;
+        const s  = lay.scale;
+        const fw = BASE_FS * s;
+        const cornerR = Math.max(1, 3 * s);
+
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.translate(px, py);
+        ctx.rotate(f.baseRot + f.cRotOffset);
+
+        // thumbnail clipped to rounded rect
+        if (sheetReady && sheetSrc) {
+          const col = f.spriteIdx % SHEET_COLS;
+          const row = (f.spriteIdx / SHEET_COLS) | 0;
+          pathRoundRect(-fw / 2, -fw / 2, fw, fw, cornerR);
+          ctx.save();
+          ctx.clip();
+          ctx.globalAlpha = a;
+          ctx.drawImage(sheetSrc,
+            col * cellPxW, row * cellPxH, cellPxW, cellPxH,
+            -fw / 2, -fw / 2, fw, fw);
+          ctx.restore();
         } else {
-          pulse.r = p * PULSE_MAX_R;
-          const pa = Math.sin(p * Math.PI) * PULSE_ALPHA;
-          ctx.strokeStyle = `rgba(${WARM[0]},${WARM[1]},${WARM[2]},${pa})`;
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.arc(smx * W, smy * H, pulse.r, 0, Math.PI * 2);
+          pathRoundRect(-fw / 2, -fw / 2, fw, fw, cornerR);
+          ctx.save();
+          ctx.clip();
+          ctx.globalAlpha = a * 0.12;
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(-fw / 2, -fw / 2, fw, fw);
+          ctx.restore();
+        }
+
+        // whitish-blue glow border — only when cursor is near
+        if (f.cGlow > 0.01) {
+          pathRoundRect(-fw / 2, -fw / 2, fw, fw, cornerR);
+          ctx.globalAlpha = f.cGlow * 0.6;
+          ctx.lineWidth = 1.5 * s;
+          ctx.strokeStyle = `rgba(${GLOW_RGB},1)`;
           ctx.stroke();
         }
+
+        ctx.restore();
       }
     }
 
@@ -670,18 +314,13 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
   }
 
   function drawOnce() {
-    mx = -1; my = -1;
-    wakeX = 0; wakeY = 0;
     cancelAnimationFrame(rafId);
-    entryStartTime = -1e6;  // skip entry fade for static render
-    draw(0);
+    userActive = false;
+    draw(performance.now());
   }
 
   resize();
-  if (!isStatic) {
-    lastMoveTime = performance.now();
-    rafId = requestAnimationFrame(draw);
-  }
+  if (!isStatic) rafId = requestAnimationFrame(draw);
 })();
 
 
