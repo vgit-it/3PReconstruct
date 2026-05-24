@@ -42,7 +42,7 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 
   // ---- cursor interaction params -----------------------------
   const INFLUENCE_R = 220;
-  const ROT_MAX     = 0.07;   // ~4° max tilt under cursor
+  const ROT_MAX     = 0.105;  // ~6° max tilt under cursor
   const LERP_IN     = 0.045;  // speed approaching boosted state
   const LERP_OUT    = 0.025;  // speed receding (slower = soft linger)
   const GLOW_RGB    = '200,220,255';
@@ -166,8 +166,8 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
         const d = Math.sqrt(dx * dx + dy * dy);
         if (d >= INFLUENCE_R) return;
         let k = 1 - d * invR; k *= k;  // softened falloff
-        tBoost += k * 0.9  * intensity;
-        tGlow  += k * 0.55 * intensity;
+        tBoost += k * 1.35 * intensity;
+        tGlow  += k * 0.825 * intensity;
         tRot   += f.rotSign * k * intensity * ROT_MAX;
       }
 
